@@ -1,9 +1,7 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype,
-    token::Client as TokenClient,
-    Address, Env, String, Vec,
+    contract, contractimpl, contracttype, token::Client as TokenClient, Address, Env, String, Vec,
 };
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -74,6 +72,7 @@ pub struct Sponsorship {
 
 #[contracttype]
 pub enum DataKey {
+    Admin,
     Token,
     EventCounter,
     Event(u32),
@@ -90,17 +89,23 @@ pub struct NovaEventsContract;
 
 #[contractimpl]
 impl NovaEventsContract {
-    /// One-time setup: record the USDC token contract address.
-    pub fn initialize(env: Env, token: Address) {
+    /// One-time setup: authorize an admin and record the USDC token contract address.
+    pub fn initialize(env: Env, admin: Address, token: Address) {
+        admin.require_auth();
+
         if env.storage().instance().has(&DataKey::Token) {
             panic!("already initialized");
         }
+        env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::Token, &token);
         env.storage().instance().set(&DataKey::EventCounter, &0u32);
     }
 
     /// Organizer creates a new event with one or more ticket tiers.
     /// Returns the new event ID.
+    // Each parameter is an independent required field on a Soroban entrypoint;
+    // bundling them into a struct would be a breaking ABI change tracked separately.
+    #[allow(clippy::too_many_arguments)]
     pub fn create_event(
         env: Env,
         organizer: Address,
@@ -210,7 +215,7 @@ impl NovaEventsContract {
         let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
         TokenClient::new(&env, &token_addr).transfer(
             &buyer,
-            &env.current_contract_address(),
+            env.current_contract_address(),
             &price,
         );
 
@@ -309,7 +314,7 @@ impl NovaEventsContract {
         let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
         TokenClient::new(&env, &token_addr).transfer(
             &sponsor,
-            &env.current_contract_address(),
+            env.current_contract_address(),
             &amount,
         );
 
