@@ -213,11 +213,6 @@ impl NovaEventsContract {
 
         let price = tier.price;
         let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
-        TokenClient::new(&env, &token_addr).transfer(
-            &buyer,
-            env.current_contract_address(),
-            &price,
-        );
 
         // Rebuild tiers with updated sold count for the purchased tier.
         let mut updated: Vec<TicketTier> = Vec::new(&env);
@@ -257,9 +252,15 @@ impl NovaEventsContract {
             &Ticket {
                 event_id,
                 tier_index,
-                owner: buyer,
+                owner: buyer.clone(),
                 redeemed: false,
             },
+        );
+
+        TokenClient::new(&env, &token_addr).transfer(
+            &buyer,
+            env.current_contract_address(),
+            &price,
         );
 
         ticket_id
@@ -312,18 +313,16 @@ impl NovaEventsContract {
         }
 
         let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
-        TokenClient::new(&env, &token_addr).transfer(
-            &sponsor,
-            env.current_contract_address(),
-            &amount,
-        );
 
         let mut sponsorships: Vec<Sponsorship> = env
             .storage()
             .persistent()
             .get(&DataKey::Sponsorships(event_id))
             .unwrap_or_else(|| Vec::new(&env));
-        sponsorships.push_back(Sponsorship { sponsor, amount });
+        sponsorships.push_back(Sponsorship {
+            sponsor: sponsor.clone(),
+            amount,
+        });
         env.storage()
             .persistent()
             .set(&DataKey::Sponsorships(event_id), &sponsorships);
@@ -332,6 +331,12 @@ impl NovaEventsContract {
         env.storage()
             .persistent()
             .set(&DataKey::Event(event_id), &event);
+
+        TokenClient::new(&env, &token_addr).transfer(
+            &sponsor,
+            env.current_contract_address(),
+            &amount,
+        );
     }
 
     // ─── Queries — readable by anyone ────────────────────────────────────────
