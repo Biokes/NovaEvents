@@ -4,6 +4,9 @@ use soroban_sdk::{
     contract, contractimpl, contracttype, token::Client as TokenClient, Address, Env, String, Vec,
 };
 
+/// Maximum number of ticket tiers allowed per event.
+const MAX_TIERS: u32 = 20;
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 /// Input shape for a ticket tier when creating an event.
@@ -121,8 +124,23 @@ impl NovaEventsContract {
         if tiers.is_empty() {
             panic!("at least one tier required");
         }
+        if tiers.len() > MAX_TIERS {
+            panic!("too many tiers");
+        }
         if funding_goal <= 0 {
             panic!("funding goal must be positive");
+        }
+        if name.is_empty() {
+            panic!("name must not be empty");
+        }
+        if description.is_empty() {
+            panic!("description must not be empty");
+        }
+        if venue.is_empty() {
+            panic!("venue must not be empty");
+        }
+        if date_unix < env.ledger().timestamp() {
+            panic!("date must not be in the past");
         }
         for i in 0..tiers.len() {
             let t: TierInput = tiers.get(i).unwrap();
