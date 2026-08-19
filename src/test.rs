@@ -1,6 +1,6 @@
 use super::*;
 use soroban_sdk::{
-    testutils::Address as _,
+    testutils::{Address as _, Ledger as _},
     token::{Client as TokenClient, StellarAssetClient},
     vec, Address, Env, String,
 };
@@ -452,6 +452,117 @@ fn test_zero_price_tier_rejected() {
         &1_750_000_000_u64,
         &100_000_000_i128,
         &bad_tiers,
+    );
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_create_event_with_past_date_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| li.timestamp = 2_000_000_000);
+
+    let (_, _, _, client) = setup(&env);
+    let organizer = Address::generate(&env);
+
+    let result = client.try_create_event(
+        &organizer,
+        &String::from_str(&env, "Time Traveler"),
+        &String::from_str(&env, "desc"),
+        &String::from_str(&env, "venue"),
+        &1_000_000_000_u64, // before the ledger's current timestamp
+        &100_000_000_i128,
+        &default_tiers(&env),
+    );
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_create_event_with_empty_name_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_, _, _, client) = setup(&env);
+    let organizer = Address::generate(&env);
+
+    let result = client.try_create_event(
+        &organizer,
+        &String::from_str(&env, ""),
+        &String::from_str(&env, "desc"),
+        &String::from_str(&env, "venue"),
+        &1_750_000_000_u64,
+        &100_000_000_i128,
+        &default_tiers(&env),
+    );
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_create_event_with_empty_description_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_, _, _, client) = setup(&env);
+    let organizer = Address::generate(&env);
+
+    let result = client.try_create_event(
+        &organizer,
+        &String::from_str(&env, "name"),
+        &String::from_str(&env, ""),
+        &String::from_str(&env, "venue"),
+        &1_750_000_000_u64,
+        &100_000_000_i128,
+        &default_tiers(&env),
+    );
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_create_event_with_empty_venue_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_, _, _, client) = setup(&env);
+    let organizer = Address::generate(&env);
+
+    let result = client.try_create_event(
+        &organizer,
+        &String::from_str(&env, "name"),
+        &String::from_str(&env, "desc"),
+        &String::from_str(&env, ""),
+        &1_750_000_000_u64,
+        &100_000_000_i128,
+        &default_tiers(&env),
+    );
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_create_event_with_too_many_tiers_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_, _, _, client) = setup(&env);
+    let organizer = Address::generate(&env);
+
+    let mut too_many_tiers: Vec<TierInput> = Vec::new(&env);
+    for _ in 0..(MAX_TIERS + 1) {
+        too_many_tiers.push_back(TierInput {
+            name: String::from_str(&env, "Tier"),
+            price: 10_000_000_i128,
+            supply_cap: 10,
+        });
+    }
+
+    let result = client.try_create_event(
+        &organizer,
+        &String::from_str(&env, "Overloaded"),
+        &String::from_str(&env, "desc"),
+        &String::from_str(&env, "venue"),
+        &1_750_000_000_u64,
+        &100_000_000_i128,
+        &too_many_tiers,
     );
 
     assert!(result.is_err());
