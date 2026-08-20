@@ -419,6 +419,35 @@ impl NovaEventsContract {
             .expect("event not found");
         event.balance
     }
+
+    /// Returns the sponsor's share of total sponsorship for an event in basis points
+    /// (1 bp = 0.01%, 10_000 bp = 100%).
+    /// Returns 0 if the address has not sponsored the event or if total sponsorship is zero.
+    pub fn get_sponsor_share(env: Env, event_id: u32, sponsor: Address) -> i128 {
+        let sponsorships: Vec<Sponsorship> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Sponsorships(event_id))
+            .unwrap_or_else(|| Vec::new(&env));
+
+        let mut sponsor_total: i128 = 0;
+        let mut grand_total: i128 = 0;
+
+        for i in 0..sponsorships.len() {
+            let s: Sponsorship = sponsorships.get(i).unwrap();
+            grand_total += s.amount;
+            if s.sponsor == sponsor {
+                sponsor_total += s.amount;
+            }
+        }
+
+        if grand_total == 0 {
+            return 0;
+        }
+
+        // Return share in basis points (sponsor_total / grand_total * 10_000)
+        sponsor_total * 10_000 / grand_total
+    }
 }
 
 #[cfg(test)]

@@ -597,3 +597,61 @@ fn test_zero_supply_cap_tier_rejected() {
 
     assert!(result.is_err());
 }
+
+#[test]
+fn test_sponsor_share_single_sponsor_is_100_percent() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, token_admin, _, client) = setup(&env);
+    let organizer = Address::generate(&env);
+    let sponsor = Address::generate(&env);
+
+    token_admin.mint(&sponsor, &500_000_000_i128);
+
+    let event_id = create_test_event(&env, &client, &organizer);
+    client.sponsor_event(&sponsor, &event_id, &300_000_000_i128);
+
+    // Single sponsor must own 100% = 10_000 basis points
+    assert_eq!(client.get_sponsor_share(&event_id, &sponsor), 10_000);
+}
+
+#[test]
+fn test_sponsor_share_multiple_sponsors_proportional() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, token_admin, _, client) = setup(&env);
+    let organizer = Address::generate(&env);
+    let sponsor_a = Address::generate(&env);
+    let sponsor_b = Address::generate(&env);
+
+    token_admin.mint(&sponsor_a, &1_000_000_000_i128);
+    token_admin.mint(&sponsor_b, &1_000_000_000_i128);
+
+    let event_id = create_test_event(&env, &client, &organizer);
+
+    // sponsor_a: 300, sponsor_b: 700 → total 1000
+    client.sponsor_event(&sponsor_a, &event_id, &300_000_000_i128);
+    client.sponsor_event(&sponsor_b, &event_id, &700_000_000_i128);
+
+    // sponsor_a share = 300/1000 * 10_000 = 3_000 bp (30%)
+    assert_eq!(client.get_sponsor_share(&event_id, &sponsor_a), 3_000);
+    // sponsor_b share = 700/1000 * 10_000 = 7_000 bp (70%)
+    assert_eq!(client.get_sponsor_share(&event_id, &sponsor_b), 7_000);
+}
+
+#[test]
+fn test_sponsor_share_zero_sponsorship_returns_zero() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, _, _, client) = setup(&env);
+    let organizer = Address::generate(&env);
+    let anyone = Address::generate(&env);
+
+    let event_id = create_test_event(&env, &client, &organizer);
+
+    // No sponsorships at all — must return 0 without panicking
+    assert_eq!(client.get_sponsor_share(&event_id, &anyone), 0);
+}
