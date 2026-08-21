@@ -655,3 +655,22 @@ fn test_sponsor_share_zero_sponsorship_returns_zero() {
     // No sponsorships at all — must return 0 without panicking
     assert_eq!(client.get_sponsor_share(&event_id, &anyone), 0);
 }
+
+#[test]
+fn test_sponsor_share_non_sponsor_returns_zero() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, token_admin, _, client) = setup(&env);
+    let organizer = Address::generate(&env);
+    let sponsor = Address::generate(&env);
+    let non_sponsor = Address::generate(&env);
+
+    token_admin.mint(&sponsor, &500_000_000_i128);
+
+    let event_id = create_test_event(&env, &client, &organizer);
+    client.sponsor_event(&sponsor, &event_id, &300_000_000_i128);
+
+    // Total sponsorship is non-zero, but non_sponsor never contributed — must be 0, not garbage.
+    assert_eq!(client.get_sponsor_share(&event_id, &non_sponsor), 0);
+}
