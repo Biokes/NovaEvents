@@ -1,0 +1,26 @@
+{
+  "name": "novaevents-sdk",
+  "version": "0.0.1",
+  "description": "TypeScript bindings for the NovaEvents Soroban smart contract",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "require": "./dist/index.js",
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs,esm --dts --clean"
+  },
+  "keywords": ["stellar", "soroban", "novaevents", "sdk"],
+  "license": "MIT",
+  "dependencies": {
+    "@stellar/stellar-sdk": "^12.3.0"
+  },
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "typescript": "^5.4.0"
+  }
+}
