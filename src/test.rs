@@ -346,6 +346,24 @@ fn test_get_token_returns_configured_address() {
 }
 
 #[test]
+fn test_get_admin_returns_configured_address() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let token_admin = Address::generate(&env);
+    let token_contract = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_addr = token_contract.address();
+
+    let contract_id = env.register(NovaEventsContract, ());
+    let client = NovaEventsContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin, &token_addr);
+
+    assert_eq!(client.get_admin(), admin);
+}
+
+#[test]
 fn test_get_balance_reflects_ticket_and_sponsor_payments() {
     let env = Env::default();
     env.mock_all_auths();

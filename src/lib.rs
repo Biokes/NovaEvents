@@ -409,6 +409,14 @@ impl NovaEventsContract {
             .expect("not initialized")
     }
 
+    /// Returns the admin address configured during initialize.
+    pub fn get_admin(env: Env) -> Address {
+        env.storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("not initialized")
+    }
+
     /// Returns the current USDC balance held by the contract for an event.
     /// Convenience wrapper around get_event so callers don't decode the full struct.
     pub fn get_balance(env: Env, event_id: u32) -> i128 {
