@@ -17,7 +17,7 @@
   "keywords": ["stellar", "soroban", "novaevents", "sdk"],
   "license": "MIT",
   "dependencies": {
-    "@stellar/stellar-sdk": "^12.3.0"
+    "@stellar/stellar-sdk": "^15.1.0"
   },
   "devDependencies": {
     "tsup": "^8.0.0",

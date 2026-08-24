@@ -13,16 +13,14 @@
  */
 
 import {
+  Account,
   Address,
   Contract,
-  ContractSpec,
   Keypair,
   nativeToScVal,
   Networks,
   rpc,
   scValToNative,
-  SorobanDataBuilder,
-  Transaction,
   TransactionBuilder,
   xdr,
 } from "@stellar/stellar-sdk";
@@ -253,17 +251,14 @@ export class NovaEventsClient {
 
   /** Simulate a read-only call and return the raw ScVal result. */
   private async query(operation: xdr.Operation): Promise<xdr.ScVal> {
-    const source = new rpc.Server(this.server["serverURL"].toString(), {
-      allowHttp: false,
-    });
-    // For read-only, we can use a random keypair as the source account for simulation
-    const dummyKeypair = Keypair.random();
-    // We use getLedgerEntries for pure simulation without a real account
+    // For read-only calls, simulation doesn't require a funded account —
+    // a fresh keypair with sequence "0" is enough to build a valid transaction.
+    const dummySource = new Account(Keypair.random().publicKey(), "0");
     const simResult = await this.server.simulateTransaction(
-      new TransactionBuilder(
-        { accountId: () => dummyKeypair.publicKey(), sequenceNumber: () => "0", incrementSequenceNumber: () => {}, baseReserve: () => BigInt(0) } as never,
-        { fee: "100", networkPassphrase: this.networkPassphrase }
-      )
+      new TransactionBuilder(dummySource, {
+        fee: "100",
+        networkPassphrase: this.networkPassphrase,
+      })
         .addOperation(operation)
         .setTimeout(30)
         .build()
