@@ -7,6 +7,10 @@ use soroban_sdk::{
 /// Maximum number of ticket tiers allowed per event.
 const MAX_TIERS: u32 = 20;
 
+/// Maximum number of sponsorships allowed per event, bounding the cost of
+/// get_sponsorships/get_sponsor_share, which both scan the full list.
+const MAX_SPONSORSHIPS: u32 = 100;
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 /// Input shape for a ticket tier when creating an event.
@@ -337,6 +341,9 @@ impl NovaEventsContract {
             .persistent()
             .get(&DataKey::Sponsorships(event_id))
             .unwrap_or_else(|| Vec::new(&env));
+        if sponsorships.len() >= MAX_SPONSORSHIPS {
+            panic!("too many sponsorships");
+        }
         sponsorships.push_back(Sponsorship {
             sponsor: sponsor.clone(),
             amount,

@@ -558,6 +558,29 @@ fn test_create_event_with_empty_venue_rejected() {
 }
 
 #[test]
+fn test_sponsorships_at_cap_then_one_more_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, token_admin, _, client) = setup(&env);
+    let organizer = Address::generate(&env);
+    let sponsor = Address::generate(&env);
+
+    token_admin.mint(&sponsor, &(MAX_SPONSORSHIPS as i128 + 1));
+
+    let event_id = create_test_event(&env, &client, &organizer);
+
+    for _ in 0..MAX_SPONSORSHIPS {
+        client.sponsor_event(&sponsor, &event_id, &1_i128);
+    }
+    assert_eq!(client.get_sponsorships(&event_id).len(), MAX_SPONSORSHIPS);
+
+    // One more, past the cap, must be rejected.
+    let result = client.try_sponsor_event(&sponsor, &event_id, &1_i128);
+    assert!(result.is_err());
+}
+
+#[test]
 fn test_create_event_with_too_many_tiers_rejected() {
     let env = Env::default();
     env.mock_all_auths();
