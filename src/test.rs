@@ -715,3 +715,91 @@ fn test_sponsor_share_non_sponsor_returns_zero() {
     // Total sponsorship is non-zero, but non_sponsor never contributed — must be 0, not garbage.
     assert_eq!(client.get_sponsor_share(&event_id, &non_sponsor), 0);
 }
+
+// ─── transfer_ticket tests ────────────────────────────────────────────────────
+
+#[test]
+fn test_transfer_ticket_basic() {
+    // Happy path: owner transfers a valid, unredeemed ticket to another address.
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, token_admin, _, client) = setup(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+    let new_owner = Address::generate(&env);
+
+    token_admin.mint(&buyer, &50_000_000_i128);
+
+    let event_id = create_test_event(&env, &client, &organizer);
+    let ticket_id = client.buy_ticket(&buyer, &event_id, &0);
+
+    // Confirm buyer owns the ticket before transfer.
+    assert_eq!(client.get_ticket(&event_id, &ticket_id).owner, buyer);
+
+    client.transfer_ticket(&buyer, &event_id, &ticket_id, &new_owner);
+
+    // After transfer, new_owner should be the recorded owner.
+    let ticket = client.get_ticket(&event_id, &ticket_id);
+    assert_eq!(ticket.owner, new_owner);
+    assert!(!ticket.redeemed);
+}
+
+#[test]
+fn test_transfer_redeemed_ticket_fails() {
+    // A ticket that has already been redeemed must not be transferable.
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, token_admin, _, client) = setup(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+    let new_owner = Address::generate(&env);
+
+    token_admin.mint(&buyer, &50_000_000_i128);
+
+    let event_id = create_test_event(&env, &client, &organizer);
+    let ticket_id = client.buy_ticket(&buyer, &event_id, &0);
+
+    // Organizer redeems the ticket at the door.
+    client.redeem_ticket(&organizer, &event_id, &ticket_id);
+
+    // Attempting to transfer a redeemed ticket must fail.
+    let result = client.try_transfer_ticket(&buyer, &event_id, &ticket_id, &new_owner);
+    assert_eq!(result, Err(Ok(Error::AlreadyRedeemed)));
+}
+
+#[test]
+fn test_transfer_ticket_no_resale_rules() {
+    // Without any resale-rule configuration the transfer is a pure ownership
+    // reassignment: no USDC moves, only ticket.owner is updated.
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (token_addr, token_admin, _, client) = setup(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    token_admin.mint(&buyer, &50_000_000_i128);
+
+    let event_id = create_test_event(&env, &client, &organizer);
+    let ticket_id = client.buy_ticket(&buyer, &event_id, &0); // costs 1 USDC
+
+    let token = soroban_sdk::token::Client::new(&env, &token_addr);
+    let buyer_balance_before = token.balance(&buyer);
+    let recipient_balance_before = token.balance(&recipient);
+
+    // Transfer with no resale rules — must succeed with no token movement.
+    client.transfer_ticket(&buyer, &event_id, &ticket_id, &recipient);
+
+    // Balances must be unchanged — this is purely an ownership record update.
+    assert_eq!(token.balance(&buyer), buyer_balance_before);
+    assert_eq!(token.balance(&recipient), recipient_balance_before);
+
+    // Ownership must have been updated.
+    assert_eq!(
+        client.get_ticket(&event_id, &ticket_id).owner,
+        recipient
+    );
+}
