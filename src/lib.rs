@@ -65,6 +65,10 @@ pub enum Error {
     TooManySponsors = 21,
     /// Caller is not the current ticket owner.
     NotOwner = 22,
+    /// Payout amount exceeds the event's current balance.
+    InsufficientBalance = 23,
+    /// Event is not in Ended status.
+    EventNotEnded = 24,
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -131,6 +135,14 @@ pub struct Sponsorship {
     pub amount: i128,
 }
 
+/// A record of a single payout disbursed from an event's balance.
+#[contracttype]
+#[derive(Clone)]
+pub struct Payout {
+    pub recipient: Address,
+    pub amount: i128,
+}
+
 // ─── Storage keys ─────────────────────────────────────────────────────────────
 
 #[contracttype]
@@ -143,6 +155,7 @@ pub enum DataKey {
     TicketCounter(u32),
     Ticket(u32, u32),
     Sponsorships(u32),
+    Payouts(u32),
 }
 
 // ─── Contract ─────────────────────────────────────────────────────────────────
@@ -496,6 +509,74 @@ impl NovaEventsContract {
         Ok(())
     }
 
+    // ─── Payouts ──────────────────────────────────────────────────────────────
+
+    /// Organizer disburses `amount` USDC from the event balance to `recipient`.
+    /// Only callable on an Ended event; every disbursement is recorded on-chain.
+    pub fn payout(
+        env: Env,
+        organizer: Address,
+        event_id: u32,
+        recipient: Address,
+        amount: i128,
+    ) -> Result<(), Error> {
+        organizer.require_auth();
+
+        let mut event: Event = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Event(event_id))
+            .ok_or(Error::EventNotFound)?;
+
+        if event.organizer != organizer {
+            return Err(Error::Unauthorized);
+        }
+        if event.status != EventStatus::Ended {
+            return Err(Error::EventNotEnded);
+        }
+        if amount <= 0 {
+            return Err(Error::InvalidAmount);
+        }
+        if amount > event.balance {
+            return Err(Error::InsufficientBalance);
+        }
+
+        let token_addr: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Token)
+            .ok_or(Error::NotInitialized)?;
+
+        // Deduct from event balance and persist.
+        event.balance -= amount;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Event(event_id), &event);
+
+        // Record disbursement.
+        let mut payouts: Vec<Payout> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Payouts(event_id))
+            .unwrap_or_else(|| Vec::new(&env));
+        payouts.push_back(Payout {
+            recipient: recipient.clone(),
+            amount,
+        });
+        env.storage()
+            .persistent()
+            .set(&DataKey::Payouts(event_id), &payouts);
+
+        // Transfer USDC from contract to recipient.
+        TokenClient::new(&env, &token_addr).transfer(
+            env.current_contract_address(),
+            &recipient,
+            &amount,
+        );
+
+        Ok(())
+    }
+
     // ─── Queries — readable by anyone ────────────────────────────────────────
 
     pub fn get_event(env: Env, event_id: u32) -> Result<Event, Error> {
@@ -523,6 +604,13 @@ impl NovaEventsContract {
         env.storage()
             .persistent()
             .get(&DataKey::Sponsorships(event_id))
+            .unwrap_or_else(|| Vec::new(&env))
+    }
+
+    pub fn get_payouts(env: Env, event_id: u32) -> Vec<Payout> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Payouts(event_id))
             .unwrap_or_else(|| Vec::new(&env))
     }
 

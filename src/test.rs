@@ -800,3 +800,166 @@ fn test_transfer_ticket_no_resale_rules() {
     // Ownership must have been updated.
     assert_eq!(client.get_ticket(&event_id, &ticket_id).owner, recipient);
 }
+
+// ─── Payout tests ─────────────────────────────────────────────────────────────
+
+/// Helper: create an event, sell a ticket to fund its balance, then end it.
+/// Returns (event_id, organizer).
+fn setup_ended_event(
+    env: &Env,
+    client: &NovaEventsContractClient,
+    token_admin: &StellarAssetClient,
+) -> (u32, Address) {
+    let organizer = Address::generate(env);
+    let buyer = Address::generate(env);
+
+    token_admin.mint(&buyer, &100_000_000_i128); // 10 USDC
+
+    let event_id = create_test_event(env, client, &organizer);
+    client.buy_ticket(&buyer, &event_id, &0); // 1 USDC → balance = 10_000_000
+
+    // Manually flip status to Ended by patching storage directly via the env.
+    env.as_contract(client.address(), || {
+        let mut event: Event = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Event(event_id))
+            .unwrap();
+        event.status = EventStatus::Ended;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Event(event_id), &event);
+    });
+
+    (event_id, organizer)
+}
+
+#[test]
+fn test_payout_happy_path() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (token_addr, token_admin, contract_id, client) = setup(&env);
+    let _ = contract_id;
+    let recipient = Address::generate(&env);
+
+    let (event_id, organizer) = setup_ended_event(&env, &client, &token_admin);
+
+    // Event balance is 10_000_000 (1 USDC from ticket sale).
+    let payout_amount = 6_000_000_i128;
+    client.payout(&organizer, &event_id, &recipient, &payout_amount);
+
+    // Balance decremented.
+    assert_eq!(client.get_balance(&event_id), 4_000_000_i128);
+
+    // Disbursement recorded.
+    let payouts = client.get_payouts(&event_id);
+    assert_eq!(payouts.len(), 1);
+    assert_eq!(payouts.get(0).unwrap().recipient, recipient);
+    assert_eq!(payouts.get(0).unwrap().amount, payout_amount);
+
+    // USDC transferred to recipient.
+    let token = TokenClient::new(&env, &token_addr);
+    assert_eq!(token.balance(&recipient), payout_amount);
+}
+
+#[test]
+fn test_payout_fails_when_amount_exceeds_balance() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, token_admin, _, client) = setup(&env);
+    let recipient = Address::generate(&env);
+
+    let (event_id, organizer) = setup_ended_event(&env, &client, &token_admin);
+
+    // Event balance is 10_000_000; try to pay out more than that.
+    let result = client.try_payout(&organizer, &event_id, &recipient, &99_000_000_i128);
+    assert_eq!(result, Err(Ok(Error::InsufficientBalance)));
+}
+
+#[test]
+fn test_payout_fails_on_active_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, _, _, client) = setup(&env);
+    let organizer = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    let event_id = create_test_event(&env, &client, &organizer);
+
+    // Event is still Active — payout must be rejected.
+    let result = client.try_payout(&organizer, &event_id, &recipient, &1_000_000_i128);
+    assert_eq!(result, Err(Ok(Error::EventNotEnded)));
+}
+
+#[test]
+fn test_payout_fails_on_cancelled_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, _, _, client) = setup(&env);
+    let organizer = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    let event_id = create_test_event(&env, &client, &organizer);
+
+    // Flip status to Cancelled.
+    env.as_contract(client.address(), || {
+        let mut event: Event = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Event(event_id))
+            .unwrap();
+        event.status = EventStatus::Cancelled;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Event(event_id), &event);
+    });
+
+    let result = client.try_payout(&organizer, &event_id, &recipient, &1_000_000_i128);
+    assert_eq!(result, Err(Ok(Error::EventNotEnded)));
+}
+
+#[test]
+fn test_payout_non_organizer_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, token_admin, _, client) = setup(&env);
+    let impostor = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    let (event_id, _) = setup_ended_event(&env, &client, &token_admin);
+
+    let result = client.try_payout(&impostor, &event_id, &recipient, &1_000_000_i128);
+    assert_eq!(result, Err(Ok(Error::Unauthorized)));
+}
+
+#[test]
+fn test_multiple_payouts_accumulate_in_ledger() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (token_addr, token_admin, _, client) = setup(&env);
+    let worker_a = Address::generate(&env);
+    let worker_b = Address::generate(&env);
+
+    let (event_id, organizer) = setup_ended_event(&env, &client, &token_admin);
+
+    // Balance: 10_000_000; pay worker_a 3 USDC, worker_b 2 USDC.
+    client.payout(&organizer, &event_id, &worker_a, &3_000_000_i128);
+    client.payout(&organizer, &event_id, &worker_b, &2_000_000_i128);
+
+    assert_eq!(client.get_balance(&event_id), 5_000_000_i128);
+
+    let payouts = client.get_payouts(&event_id);
+    assert_eq!(payouts.len(), 2);
+    assert_eq!(payouts.get(0).unwrap().recipient, worker_a);
+    assert_eq!(payouts.get(1).unwrap().recipient, worker_b);
+
+    let token = TokenClient::new(&env, &token_addr);
+    assert_eq!(token.balance(&worker_a), 3_000_000_i128);
+    assert_eq!(token.balance(&worker_b), 2_000_000_i128);
+}
