@@ -1,7 +1,7 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contractimpl, contracterror, contracttype, token::Client as TokenClient, Address,
+    contract, contracterror, contractimpl, contracttype, token::Client as TokenClient, Address,
     Env, String, Vec,
 };
 
@@ -63,6 +63,8 @@ pub enum Error {
     InvalidAmount = 20,
     /// Event has reached the maximum number of sponsorships.
     TooManySponsors = 21,
+    /// Caller is not the current ticket owner.
+    NotOwner = 22,
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -383,6 +385,56 @@ impl NovaEventsContract {
         env.storage()
             .persistent()
             .set(&DataKey::Ticket(event_id, ticket_id), &ticket);
+        Ok(())
+    }
+
+    /// Transfer ticket ownership from the current owner to a new address.
+    ///
+    /// Rules enforced:
+    /// - `from` must be the current ticket owner and must authorize the call.
+    /// - The event must not be `Cancelled` or `Ended`.
+    /// - The ticket must not have been redeemed already.
+    pub fn transfer_ticket(
+        env: Env,
+        from: Address,
+        event_id: u32,
+        ticket_id: u32,
+        to: Address,
+    ) -> Result<(), Error> {
+        from.require_auth();
+
+        let event: Event = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Event(event_id))
+            .ok_or(Error::EventNotFound)?;
+
+        // Transfers are blocked for Cancelled or Ended events.
+        if event.status == EventStatus::Cancelled || event.status == EventStatus::Ended {
+            return Err(Error::EventNotActive);
+        }
+
+        let mut ticket: Ticket = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Ticket(event_id, ticket_id))
+            .ok_or(Error::TicketNotFound)?;
+
+        // Only the current owner may transfer.
+        if ticket.owner != from {
+            return Err(Error::NotOwner);
+        }
+
+        // A redeemed ticket cannot change hands.
+        if ticket.redeemed {
+            return Err(Error::AlreadyRedeemed);
+        }
+
+        ticket.owner = to;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Ticket(event_id, ticket_id), &ticket);
+
         Ok(())
     }
 
