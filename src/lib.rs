@@ -1,7 +1,7 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contractimpl, contracterror, contracttype, token::Client as TokenClient, Address,
+    contract, contracterror, contractimpl, contracttype, token::Client as TokenClient, Address,
     Env, String, Vec,
 };
 

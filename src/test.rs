@@ -798,8 +798,5 @@ fn test_transfer_ticket_no_resale_rules() {
     assert_eq!(token.balance(&recipient), recipient_balance_before);
 
     // Ownership must have been updated.
-    assert_eq!(
-        client.get_ticket(&event_id, &ticket_id).owner,
-        recipient
-    );
+    assert_eq!(client.get_ticket(&event_id, &ticket_id).owner, recipient);
 }
