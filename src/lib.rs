@@ -569,7 +569,7 @@ impl NovaEventsContract {
 
         // Transfer USDC from contract to recipient.
         TokenClient::new(&env, &token_addr).transfer(
-            env.current_contract_address(),
+            &env.current_contract_address(),
             &recipient,
             &amount,
         );

@@ -819,7 +819,7 @@ fn setup_ended_event(
     client.buy_ticket(&buyer, &event_id, &0); // 1 USDC → balance = 10_000_000
 
     // Manually flip status to Ended by patching storage directly via the env.
-    env.as_contract(client.address(), || {
+    env.as_contract(&client.address, || {
         let mut event: Event = env
             .storage()
             .persistent()
@@ -906,7 +906,7 @@ fn test_payout_fails_on_cancelled_event() {
     let event_id = create_test_event(&env, &client, &organizer);
 
     // Flip status to Cancelled.
-    env.as_contract(client.address(), || {
+    env.as_contract(&client.address, || {
         let mut event: Event = env
             .storage()
             .persistent()
