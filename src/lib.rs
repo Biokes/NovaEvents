@@ -1,7 +1,8 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, token::Client as TokenClient, Address, Env, String, Vec,
+    contract, contractimpl, contracterror, contracttype, token::Client as TokenClient, Address,
+    Env, String, Vec,
 };
 
 /// Maximum number of ticket tiers allowed per event.
@@ -10,6 +11,59 @@ const MAX_TIERS: u32 = 20;
 /// Maximum number of sponsorships allowed per event, bounding the cost of
 /// get_sponsorships/get_sponsor_share, which both scan the full list.
 const MAX_SPONSORSHIPS: u32 = 100;
+
+// ─── Error enum ───────────────────────────────────────────────────────────────
+
+/// All structured failure codes returned by the contract.
+/// Using `#[contracterror]` means callers receive a typed, distinguishable
+/// error code instead of an opaque panic trap.
+#[contracterror]
+#[derive(Copy, Clone, Debug, PartialEq)]
+#[repr(u32)]
+pub enum Error {
+    /// Contract has already been initialised.
+    AlreadyInitialized = 1,
+    /// Contract has not been initialised yet.
+    NotInitialized = 2,
+    /// The requested event does not exist.
+    EventNotFound = 3,
+    /// The requested ticket does not exist.
+    TicketNotFound = 4,
+    /// Tier storage for an event is missing (internal inconsistency).
+    TiersNotFound = 5,
+    /// Caller is not the organizer of the event.
+    Unauthorized = 6,
+    /// Event is not in Active status.
+    EventNotActive = 7,
+    /// Ticket has already been redeemed.
+    AlreadyRedeemed = 8,
+    /// The requested tier index is out of range.
+    InvalidTier = 9,
+    /// The requested tier has no remaining supply.
+    TierSoldOut = 10,
+    /// Event must have at least one tier.
+    NoTiers = 11,
+    /// Event exceeds the maximum allowed number of tiers.
+    TooManyTiers = 12,
+    /// Funding goal must be a positive amount.
+    InvalidFundingGoal = 13,
+    /// Event name must not be empty.
+    EmptyName = 14,
+    /// Event description must not be empty.
+    EmptyDescription = 15,
+    /// Event venue must not be empty.
+    EmptyVenue = 16,
+    /// Event date must not be in the past.
+    DateInPast = 17,
+    /// Tier price must be a positive amount.
+    InvalidTierPrice = 18,
+    /// Tier supply cap must be at least 1.
+    InvalidTierSupply = 19,
+    /// Sponsorship amount must be positive.
+    InvalidAmount = 20,
+    /// Event has reached the maximum number of sponsorships.
+    TooManySponsors = 21,
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -97,15 +151,16 @@ pub struct NovaEventsContract;
 #[contractimpl]
 impl NovaEventsContract {
     /// One-time setup: authorize an admin and record the USDC token contract address.
-    pub fn initialize(env: Env, admin: Address, token: Address) {
+    pub fn initialize(env: Env, admin: Address, token: Address) -> Result<(), Error> {
         admin.require_auth();
 
         if env.storage().instance().has(&DataKey::Token) {
-            panic!("already initialized");
+            return Err(Error::AlreadyInitialized);
         }
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::Token, &token);
         env.storage().instance().set(&DataKey::EventCounter, &0u32);
+        Ok(())
     }
 
     /// Organizer creates a new event with one or more ticket tiers.
@@ -122,37 +177,37 @@ impl NovaEventsContract {
         date_unix: u64,
         funding_goal: i128,
         tiers: Vec<TierInput>,
-    ) -> u32 {
+    ) -> Result<u32, Error> {
         organizer.require_auth();
 
         if tiers.is_empty() {
-            panic!("at least one tier required");
+            return Err(Error::NoTiers);
         }
         if tiers.len() > MAX_TIERS {
-            panic!("too many tiers");
+            return Err(Error::TooManyTiers);
         }
         if funding_goal <= 0 {
-            panic!("funding goal must be positive");
+            return Err(Error::InvalidFundingGoal);
         }
         if name.is_empty() {
-            panic!("name must not be empty");
+            return Err(Error::EmptyName);
         }
         if description.is_empty() {
-            panic!("description must not be empty");
+            return Err(Error::EmptyDescription);
         }
         if venue.is_empty() {
-            panic!("venue must not be empty");
+            return Err(Error::EmptyVenue);
         }
         if date_unix < env.ledger().timestamp() {
-            panic!("date must not be in the past");
+            return Err(Error::DateInPast);
         }
         for i in 0..tiers.len() {
             let t: TierInput = tiers.get(i).unwrap();
             if t.price <= 0 {
-                panic!("tier price must be positive");
+                return Err(Error::InvalidTierPrice);
             }
             if t.supply_cap == 0 {
-                panic!("tier supply cap must be at least 1");
+                return Err(Error::InvalidTierSupply);
             }
         }
 
@@ -201,40 +256,49 @@ impl NovaEventsContract {
             .persistent()
             .set(&DataKey::Sponsorships(event_id), &empty_s);
 
-        event_id
+        Ok(event_id)
     }
 
     /// Buyer purchases a ticket in a given tier.
     /// Transfers `tier.price` USDC from buyer to this contract.
     /// Returns the new ticket ID.
-    pub fn buy_ticket(env: Env, buyer: Address, event_id: u32, tier_index: u32) -> u32 {
+    pub fn buy_ticket(
+        env: Env,
+        buyer: Address,
+        event_id: u32,
+        tier_index: u32,
+    ) -> Result<u32, Error> {
         buyer.require_auth();
 
         let mut event: Event = env
             .storage()
             .persistent()
             .get(&DataKey::Event(event_id))
-            .expect("event not found");
+            .ok_or(Error::EventNotFound)?;
         if event.status != EventStatus::Active {
-            panic!("event not active");
+            return Err(Error::EventNotActive);
         }
 
         let tiers: Vec<TicketTier> = env
             .storage()
             .persistent()
             .get(&DataKey::Tiers(event_id))
-            .expect("tiers not found");
+            .ok_or(Error::TiersNotFound)?;
         if tier_index >= tiers.len() {
-            panic!("invalid tier");
+            return Err(Error::InvalidTier);
         }
 
         let tier: TicketTier = tiers.get(tier_index).unwrap();
         if tier.tickets_sold >= tier.supply_cap {
-            panic!("tier sold out");
+            return Err(Error::TierSoldOut);
         }
 
         let price = tier.price;
-        let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
+        let token_addr: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Token)
+            .ok_or(Error::NotInitialized)?;
 
         // Rebuild tiers with updated sold count for the purchased tier.
         let mut updated: Vec<TicketTier> = Vec::new(&env);
@@ -285,56 +349,71 @@ impl NovaEventsContract {
             &price,
         );
 
-        ticket_id
+        Ok(ticket_id)
     }
 
     /// Organizer checks in (redeems) a ticket at the door.
-    pub fn redeem_ticket(env: Env, organizer: Address, event_id: u32, ticket_id: u32) {
+    pub fn redeem_ticket(
+        env: Env,
+        organizer: Address,
+        event_id: u32,
+        ticket_id: u32,
+    ) -> Result<(), Error> {
         organizer.require_auth();
 
         let event: Event = env
             .storage()
             .persistent()
             .get(&DataKey::Event(event_id))
-            .expect("event not found");
+            .ok_or(Error::EventNotFound)?;
         if event.organizer != organizer {
-            panic!("not the organizer");
+            return Err(Error::Unauthorized);
         }
 
         let mut ticket: Ticket = env
             .storage()
             .persistent()
             .get(&DataKey::Ticket(event_id, ticket_id))
-            .expect("ticket not found");
+            .ok_or(Error::TicketNotFound)?;
         if ticket.redeemed {
-            panic!("already redeemed");
+            return Err(Error::AlreadyRedeemed);
         }
 
         ticket.redeemed = true;
         env.storage()
             .persistent()
             .set(&DataKey::Ticket(event_id, ticket_id), &ticket);
+        Ok(())
     }
 
     /// Sponsor contributes USDC to an event.
     /// Contribution is recorded publicly against the sponsor's address.
-    pub fn sponsor_event(env: Env, sponsor: Address, event_id: u32, amount: i128) {
+    pub fn sponsor_event(
+        env: Env,
+        sponsor: Address,
+        event_id: u32,
+        amount: i128,
+    ) -> Result<(), Error> {
         sponsor.require_auth();
 
         if amount <= 0 {
-            panic!("amount must be positive");
+            return Err(Error::InvalidAmount);
         }
 
         let mut event: Event = env
             .storage()
             .persistent()
             .get(&DataKey::Event(event_id))
-            .expect("event not found");
+            .ok_or(Error::EventNotFound)?;
         if event.status != EventStatus::Active {
-            panic!("event not active");
+            return Err(Error::EventNotActive);
         }
 
-        let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
+        let token_addr: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Token)
+            .ok_or(Error::NotInitialized)?;
 
         let mut sponsorships: Vec<Sponsorship> = env
             .storage()
@@ -342,7 +421,7 @@ impl NovaEventsContract {
             .get(&DataKey::Sponsorships(event_id))
             .unwrap_or_else(|| Vec::new(&env));
         if sponsorships.len() >= MAX_SPONSORSHIPS {
-            panic!("too many sponsorships");
+            return Err(Error::TooManySponsors);
         }
         sponsorships.push_back(Sponsorship {
             sponsor: sponsor.clone(),
@@ -362,29 +441,30 @@ impl NovaEventsContract {
             env.current_contract_address(),
             &amount,
         );
+        Ok(())
     }
 
     // ─── Queries — readable by anyone ────────────────────────────────────────
 
-    pub fn get_event(env: Env, event_id: u32) -> Event {
+    pub fn get_event(env: Env, event_id: u32) -> Result<Event, Error> {
         env.storage()
             .persistent()
             .get(&DataKey::Event(event_id))
-            .expect("event not found")
+            .ok_or(Error::EventNotFound)
     }
 
-    pub fn get_tiers(env: Env, event_id: u32) -> Vec<TicketTier> {
+    pub fn get_tiers(env: Env, event_id: u32) -> Result<Vec<TicketTier>, Error> {
         env.storage()
             .persistent()
             .get(&DataKey::Tiers(event_id))
-            .expect("tiers not found")
+            .ok_or(Error::TiersNotFound)
     }
 
-    pub fn get_ticket(env: Env, event_id: u32, ticket_id: u32) -> Ticket {
+    pub fn get_ticket(env: Env, event_id: u32, ticket_id: u32) -> Result<Ticket, Error> {
         env.storage()
             .persistent()
             .get(&DataKey::Ticket(event_id, ticket_id))
-            .expect("ticket not found")
+            .ok_or(Error::TicketNotFound)
     }
 
     pub fn get_sponsorships(env: Env, event_id: u32) -> Vec<Sponsorship> {
@@ -409,30 +489,30 @@ impl NovaEventsContract {
     }
 
     /// Returns the token contract address configured during initialize.
-    pub fn get_token(env: Env) -> Address {
+    pub fn get_token(env: Env) -> Result<Address, Error> {
         env.storage()
             .instance()
             .get(&DataKey::Token)
-            .expect("not initialized")
+            .ok_or(Error::NotInitialized)
     }
 
     /// Returns the admin address configured during initialize.
-    pub fn get_admin(env: Env) -> Address {
+    pub fn get_admin(env: Env) -> Result<Address, Error> {
         env.storage()
             .instance()
             .get(&DataKey::Admin)
-            .expect("not initialized")
+            .ok_or(Error::NotInitialized)
     }
 
     /// Returns the current USDC balance held by the contract for an event.
     /// Convenience wrapper around get_event so callers don't decode the full struct.
-    pub fn get_balance(env: Env, event_id: u32) -> i128 {
+    pub fn get_balance(env: Env, event_id: u32) -> Result<i128, Error> {
         let event: Event = env
             .storage()
             .persistent()
             .get(&DataKey::Event(event_id))
-            .expect("event not found");
-        event.balance
+            .ok_or(Error::EventNotFound)?;
+        Ok(event.balance)
     }
 
     /// Returns the sponsor's share of total sponsorship for an event in basis points

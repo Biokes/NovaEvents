@@ -251,7 +251,7 @@ fn test_sold_out_tier_blocks_purchase() {
     client.buy_ticket(&buyer_a, &event_id, &0);
 
     let result = client.try_buy_ticket(&buyer_b, &event_id, &0);
-    assert!(result.is_err());
+    assert_eq!(result, Err(Ok(Error::TierSoldOut)));
 }
 
 #[test]
@@ -271,7 +271,7 @@ fn test_double_redeem_fails() {
     client.redeem_ticket(&organizer, &event_id, &ticket_id);
 
     let result = client.try_redeem_ticket(&organizer, &event_id, &ticket_id);
-    assert!(result.is_err());
+    assert_eq!(result, Err(Ok(Error::AlreadyRedeemed)));
 }
 
 #[test]
@@ -284,7 +284,7 @@ fn test_double_initialize_rejected() {
     // setup() already called initialize once; a second call must fail
     let admin = Address::generate(&env);
     let result = client.try_initialize(&admin, &token_addr);
-    assert!(result.is_err());
+    assert_eq!(result, Err(Ok(Error::AlreadyInitialized)));
 }
 
 #[test]
@@ -315,7 +315,7 @@ fn test_sponsor_nonexistent_event_fails() {
 
     // No event created — event_id 99 does not exist
     let result = client.try_sponsor_event(&sponsor, &99, &100_000_000_i128);
-    assert!(result.is_err());
+    assert_eq!(result, Err(Ok(Error::EventNotFound)));
 }
 
 #[test]
@@ -334,7 +334,7 @@ fn test_non_organizer_cannot_redeem_ticket() {
     let ticket_id = client.buy_ticket(&buyer, &event_id, &0);
 
     let result = client.try_redeem_ticket(&impostor, &event_id, &ticket_id);
-    assert!(result.is_err());
+    assert_eq!(result, Err(Ok(Error::Unauthorized)));
 }
 
 #[test]
@@ -402,7 +402,7 @@ fn test_invalid_tier_index_rejected() {
 
     // default_tiers has 2 tiers (index 0 and 1); index 99 is out of range
     let result = client.try_buy_ticket(&buyer, &event_id, &99);
-    assert!(result.is_err());
+    assert_eq!(result, Err(Ok(Error::InvalidTier)));
 }
 
 #[test]
@@ -422,7 +422,7 @@ fn test_create_event_with_no_tiers_rejected() {
         &Vec::new(&env),
     );
 
-    assert!(result.is_err());
+    assert_eq!(result, Err(Ok(Error::NoTiers)));
 }
 
 #[test]
@@ -442,7 +442,7 @@ fn test_create_event_with_negative_funding_goal_rejected() {
         &default_tiers(&env),
     );
 
-    assert!(result.is_err());
+    assert_eq!(result, Err(Ok(Error::InvalidFundingGoal)));
 }
 
 #[test]
@@ -472,7 +472,7 @@ fn test_zero_price_tier_rejected() {
         &bad_tiers,
     );
 
-    assert!(result.is_err());
+    assert_eq!(result, Err(Ok(Error::InvalidTierPrice)));
 }
 
 #[test]
@@ -494,7 +494,7 @@ fn test_create_event_with_past_date_rejected() {
         &default_tiers(&env),
     );
 
-    assert!(result.is_err());
+    assert_eq!(result, Err(Ok(Error::DateInPast)));
 }
 
 #[test]
@@ -514,7 +514,7 @@ fn test_create_event_with_empty_name_rejected() {
         &default_tiers(&env),
     );
 
-    assert!(result.is_err());
+    assert_eq!(result, Err(Ok(Error::EmptyName)));
 }
 
 #[test]
@@ -534,7 +534,7 @@ fn test_create_event_with_empty_description_rejected() {
         &default_tiers(&env),
     );
 
-    assert!(result.is_err());
+    assert_eq!(result, Err(Ok(Error::EmptyDescription)));
 }
 
 #[test]
@@ -554,7 +554,7 @@ fn test_create_event_with_empty_venue_rejected() {
         &default_tiers(&env),
     );
 
-    assert!(result.is_err());
+    assert_eq!(result, Err(Ok(Error::EmptyVenue)));
 }
 
 #[test]
@@ -575,9 +575,9 @@ fn test_sponsorships_at_cap_then_one_more_rejected() {
     }
     assert_eq!(client.get_sponsorships(&event_id).len(), MAX_SPONSORSHIPS);
 
-    // One more, past the cap, must be rejected.
+    // One more, past the cap, must be rejected with typed error.
     let result = client.try_sponsor_event(&sponsor, &event_id, &1_i128);
-    assert!(result.is_err());
+    assert_eq!(result, Err(Ok(Error::TooManySponsors)));
 }
 
 #[test]
@@ -606,7 +606,7 @@ fn test_create_event_with_too_many_tiers_rejected() {
         &too_many_tiers,
     );
 
-    assert!(result.is_err());
+    assert_eq!(result, Err(Ok(Error::TooManyTiers)));
 }
 
 #[test]
@@ -636,7 +636,7 @@ fn test_zero_supply_cap_tier_rejected() {
         &bad_tiers,
     );
 
-    assert!(result.is_err());
+    assert_eq!(result, Err(Ok(Error::InvalidTierSupply)));
 }
 
 #[test]
