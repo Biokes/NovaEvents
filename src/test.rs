@@ -864,6 +864,27 @@ fn test_payout_happy_path() {
 }
 
 #[test]
+fn test_payouts_at_cap_then_one_more_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, token_admin, _, client) = setup(&env);
+    let recipient = Address::generate(&env);
+
+    let (event_id, organizer) = setup_ended_event(&env, &client, &token_admin);
+
+    // Event balance is 10_000_000 — MAX_PAYOUTS payouts of 1 stroop each fits easily.
+    for _ in 0..MAX_PAYOUTS {
+        client.payout(&organizer, &event_id, &recipient, &1_i128);
+    }
+    assert_eq!(client.get_payouts(&event_id).len(), MAX_PAYOUTS);
+
+    // One more, past the cap, must be rejected.
+    let result = client.try_payout(&organizer, &event_id, &recipient, &1_i128);
+    assert_eq!(result, Err(Ok(Error::TooManyPayouts)));
+}
+
+#[test]
 fn test_payout_fails_when_amount_exceeds_balance() {
     let env = Env::default();
     env.mock_all_auths();

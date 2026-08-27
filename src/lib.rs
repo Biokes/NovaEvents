@@ -12,6 +12,10 @@ const MAX_TIERS: u32 = 20;
 /// get_sponsorships/get_sponsor_share, which both scan the full list.
 const MAX_SPONSORSHIPS: u32 = 100;
 
+/// Maximum number of payouts recorded per event, bounding the cost of
+/// get_payouts, which scans the full list.
+const MAX_PAYOUTS: u32 = 100;
+
 // ─── Error enum ───────────────────────────────────────────────────────────────
 
 /// All structured failure codes returned by the contract.
@@ -69,6 +73,8 @@ pub enum Error {
     InsufficientBalance = 23,
     /// Event is not in Ended status.
     EventNotEnded = 24,
+    /// Event has reached the maximum number of recorded payouts.
+    TooManyPayouts = 25,
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -547,6 +553,15 @@ impl NovaEventsContract {
             .get(&DataKey::Token)
             .ok_or(Error::NotInitialized)?;
 
+        let mut payouts: Vec<Payout> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Payouts(event_id))
+            .unwrap_or_else(|| Vec::new(&env));
+        if payouts.len() >= MAX_PAYOUTS {
+            return Err(Error::TooManyPayouts);
+        }
+
         // Deduct from event balance and persist.
         event.balance -= amount;
         env.storage()
@@ -554,11 +569,6 @@ impl NovaEventsContract {
             .set(&DataKey::Event(event_id), &event);
 
         // Record disbursement.
-        let mut payouts: Vec<Payout> = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Payouts(event_id))
-            .unwrap_or_else(|| Vec::new(&env));
         payouts.push_back(Payout {
             recipient: recipient.clone(),
             amount,
