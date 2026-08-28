@@ -770,6 +770,29 @@ fn test_transfer_redeemed_ticket_fails() {
 }
 
 #[test]
+fn test_transfer_ticket_to_self_rejected() {
+    // Transferring a ticket to its own current owner is a meaningless no-op
+    // and must be rejected rather than silently succeeding.
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, token_admin, _, client) = setup(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    token_admin.mint(&buyer, &50_000_000_i128);
+
+    let event_id = create_test_event(&env, &client, &organizer);
+    let ticket_id = client.buy_ticket(&buyer, &event_id, &0);
+
+    let result = client.try_transfer_ticket(&buyer, &event_id, &ticket_id, &buyer);
+    assert_eq!(result, Err(Ok(Error::InvalidRecipient)));
+
+    // Ownership must be unchanged.
+    assert_eq!(client.get_ticket(&event_id, &ticket_id).owner, buyer);
+}
+
+#[test]
 fn test_transfer_ticket_no_resale_rules() {
     // Without any resale-rule configuration the transfer is a pure ownership
     // reassignment: no USDC moves, only ticket.owner is updated.

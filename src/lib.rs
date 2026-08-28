@@ -75,6 +75,8 @@ pub enum Error {
     EventNotEnded = 24,
     /// Event has reached the maximum number of recorded payouts.
     TooManyPayouts = 25,
+    /// Recipient must differ from the ticket's current owner.
+    InvalidRecipient = 26,
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -442,6 +444,11 @@ impl NovaEventsContract {
         // Only the current owner may transfer.
         if ticket.owner != from {
             return Err(Error::NotOwner);
+        }
+
+        // Transferring to yourself is a meaningless no-op.
+        if to == from {
+            return Err(Error::InvalidRecipient);
         }
 
         // A redeemed ticket cannot change hands.
