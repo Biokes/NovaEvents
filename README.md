@@ -113,6 +113,31 @@ The compiled WASM lands at `target/wasm32v1-none/release/nova_events.wasm`.
 cargo test
 ```
 
+### End-to-end lifecycle check
+
+`cargo test` runs against an in-process `Env::default()`. To verify the contract
+through the real Stellar CLI and RPC path — deploy, initialize, create an event,
+sell tickets, transfer and check one in, take a sponsorship, and disburse a
+payout — run the lifecycle script:
+
+```bash
+# Local Soroban sandbox (requires a running Docker daemon)
+./scripts/e2e_lifecycle.sh
+
+# Or against the public testnet, no Docker needed
+./scripts/e2e_lifecycle.sh --network testnet
+```
+
+The script deploys a fresh contract, funds four throwaway accounts (organizer,
+attendee, sponsor, worker), and asserts both the happy path and the rejection
+codes at each stage. It settles in the native Stellar Asset Contract rather than
+USDC so it needs no issuer or trustline setup; the contract itself is
+token-agnostic, so the flow is identical.
+
+This is the recommended manual verification step before tagging a release.
+See [CONTRIBUTING.md](./CONTRIBUTING.md#end-to-end-lifecycle-verification) for
+the full option list.
+
 ### Deploy to testnet
 
 ```bash

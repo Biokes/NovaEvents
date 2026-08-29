@@ -68,12 +68,63 @@ stellar contract deploy \
   --source <your-account>
 ```
 
+## End-to-end lifecycle verification
+
+`cargo test` runs the contract in-process against `Env::default()`. That catches
+logic bugs, but it never serializes arguments over XDR, never signs a real
+transaction, and never crosses a contract boundary into the token — so it cannot
+catch deployment- or ABI-level breakage.
+
+`scripts/e2e_lifecycle.sh` covers that gap. It drives a freshly deployed contract
+through a full event lifecycle using only the Stellar CLI and RPC:
+
+```
+deploy -> initialize -> create_event -> buy_ticket -> transfer_ticket
+       -> redeem_ticket -> sponsor_event -> end_event -> payout
+```
+
+At every stage it asserts both the happy path and the expected `#[contracterror]`
+code for the matching failure, and it cross-checks the event balance the contract
+reports against the token contract's own view of what it holds.
+
+```bash
+# Local Soroban sandbox — self-contained, requires a running Docker daemon
+./scripts/e2e_lifecycle.sh
+
+# Public testnet — no Docker, needs internet
+./scripts/e2e_lifecycle.sh --network testnet
+```
+
+| Option | Effect |
+|--------|--------|
+| `--network <local\|testnet>` | Target network. Default `local`. |
+| `--skip-build` | Reuse the existing WASM instead of rebuilding. |
+| `--keep-sandbox` | Leave the local container running after the run. |
+| `--require-end-event` | Fail, rather than skip, if `end_event` is missing. |
+
+The script generates and funds four throwaway accounts (organizer, attendee,
+sponsor, worker) and removes them on exit. It settles in the native Stellar Asset
+Contract instead of USDC, so no issuer, trustline, or minting setup is needed —
+the contract stores whatever token address `initialize` is given, so the flow is
+identical either way.
+
+**Run this before tagging a release**, and after any change to a public
+entrypoint's signature. It is deliberately not part of CI: it needs either Docker
+or live network access, and it submits real transactions.
+
+`end_event` is still open ([#1](https://github.com/NovaFest-Labs/NovaEvents/issues/1)).
+Until it lands the script detects its absence from the deployed contract's spec,
+asserts that `payout` correctly rejects with `EventNotEnded`, and reports that
+stage as skipped. No edit is needed once `end_event` ships — the stage activates
+on its own.
+
 ## Making a contribution
 
 1. Fork the repository and create a branch named after the issue: `issue-42-ticket-transfer`.
 2. Write your code. Keep changes focused on the issue — don't refactor unrelated things in the same PR.
 3. Add or update tests. Every new function needs a test that covers the happy path and at least one failure case.
-4. Run `cargo test` and make sure everything passes.
+4. Run `cargo test` and make sure everything passes. If you changed a public
+   entrypoint's signature, also run `scripts/e2e_lifecycle.sh --network testnet`.
 5. Open a pull request against `main`. Fill in the PR description: what changed, why, and how you tested it.
 
 ## Code standards
