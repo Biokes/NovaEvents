@@ -409,6 +409,31 @@ impl NovaEventsContract {
         Ok(())
     }
 
+    /// Organizer closes an event, transitioning it from `Active` to `Ended`.
+    /// Blocks further ticket purchases and sponsorships, and is the
+    /// prerequisite for `payout`.
+    pub fn end_event(env: Env, organizer: Address, event_id: u32) -> Result<(), Error> {
+        organizer.require_auth();
+
+        let mut event: Event = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Event(event_id))
+            .ok_or(Error::EventNotFound)?;
+        if event.organizer != organizer {
+            return Err(Error::Unauthorized);
+        }
+        if event.status != EventStatus::Active {
+            return Err(Error::EventNotActive);
+        }
+
+        event.status = EventStatus::Ended;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Event(event_id), &event);
+        Ok(())
+    }
+
     /// Transfer ticket ownership from the current owner to a new address.
     ///
     /// Rules enforced:

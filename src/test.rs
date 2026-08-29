@@ -185,6 +185,71 @@ fn test_redeem_ticket() {
 }
 
 #[test]
+fn test_end_event_changes_status_to_ended() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, _, _, client) = setup(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_test_event(&env, &client, &organizer);
+
+    assert_eq!(client.get_event(&event_id).status, EventStatus::Active);
+
+    client.end_event(&organizer, &event_id);
+
+    assert_eq!(client.get_event(&event_id).status, EventStatus::Ended);
+}
+
+#[test]
+fn test_end_event_by_non_organizer_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, _, _, client) = setup(&env);
+    let organizer = Address::generate(&env);
+    let impostor = Address::generate(&env);
+    let event_id = create_test_event(&env, &client, &organizer);
+
+    let result = client.try_end_event(&impostor, &event_id);
+    assert_eq!(result, Err(Ok(Error::Unauthorized)));
+
+    // Status must be unchanged.
+    assert_eq!(client.get_event(&event_id).status, EventStatus::Active);
+}
+
+#[test]
+fn test_end_already_ended_event_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, _, _, client) = setup(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_test_event(&env, &client, &organizer);
+
+    client.end_event(&organizer, &event_id);
+
+    let result = client.try_end_event(&organizer, &event_id);
+    assert_eq!(result, Err(Ok(Error::EventNotActive)));
+}
+
+#[test]
+fn test_sponsor_event_blocked_after_end_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, token_admin, _, client) = setup(&env);
+    let organizer = Address::generate(&env);
+    let sponsor = Address::generate(&env);
+    token_admin.mint(&sponsor, &100_000_000_i128);
+
+    let event_id = create_test_event(&env, &client, &organizer);
+    client.end_event(&organizer, &event_id);
+
+    let result = client.try_sponsor_event(&sponsor, &event_id, &10_000_000_i128);
+    assert_eq!(result, Err(Ok(Error::EventNotActive)));
+}
+
+#[test]
 fn test_sponsorship_is_publicly_recorded() {
     let env = Env::default();
     env.mock_all_auths();
@@ -840,19 +905,7 @@ fn setup_ended_event(
 
     let event_id = create_test_event(env, client, &organizer);
     client.buy_ticket(&buyer, &event_id, &0); // 1 USDC → balance = 10_000_000
-
-    // Manually flip status to Ended by patching storage directly via the env.
-    env.as_contract(&client.address, || {
-        let mut event: Event = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Event(event_id))
-            .unwrap();
-        event.status = EventStatus::Ended;
-        env.storage()
-            .persistent()
-            .set(&DataKey::Event(event_id), &event);
-    });
+    client.end_event(&organizer, &event_id);
 
     (event_id, organizer)
 }
