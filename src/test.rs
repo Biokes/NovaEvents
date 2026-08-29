@@ -1007,3 +1007,168 @@ fn test_multiple_payouts_accumulate_in_ledger() {
     assert_eq!(token.balance(&worker_a), 3_000_000_i128);
     assert_eq!(token.balance(&worker_b), 2_000_000_i128);
 }
+
+// ─── Event summary tests ─────────────────────────────────────────────────────
+
+#[test]
+fn test_get_event_summary_new_event_is_all_zeros() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, _, _, client) = setup(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_test_event(&env, &client, &organizer);
+
+    let summary = client.get_event_summary(&event_id);
+    assert_eq!(summary.ticket_revenue, 0);
+    assert_eq!(summary.sponsorship_total, 0);
+    assert_eq!(summary.total_collected, 0);
+    assert_eq!(summary.total_paid_out, 0);
+    assert_eq!(summary.balance, 0);
+}
+
+/// The invariant that makes the summary an audit tool: across a realistic mix of
+/// sales, sponsorships, and payouts, every unit collected is either still held
+/// or recorded as disbursed.
+#[test]
+fn test_get_event_summary_invariant_across_full_lifecycle() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, token_admin, _, client) = setup(&env);
+
+    let organizer = Address::generate(&env);
+    let attendee_a = Address::generate(&env);
+    let attendee_b = Address::generate(&env);
+    let sponsor_a = Address::generate(&env);
+    let sponsor_b = Address::generate(&env);
+    let worker = Address::generate(&env);
+    let vendor = Address::generate(&env);
+
+    token_admin.mint(&attendee_a, &100_000_000_i128);
+    token_admin.mint(&attendee_b, &100_000_000_i128);
+    token_admin.mint(&sponsor_a, &200_000_000_i128);
+    token_admin.mint(&sponsor_b, &100_000_000_i128);
+
+    let event_id = create_test_event(&env, &client, &organizer);
+
+    // Two General tickets (1 USDC each) and one VIP (5 USDC) → 7 USDC.
+    client.buy_ticket(&attendee_a, &event_id, &0);
+    client.buy_ticket(&attendee_a, &event_id, &0);
+    client.buy_ticket(&attendee_b, &event_id, &1);
+    let expected_ticket_revenue = 70_000_000_i128;
+
+    // Two sponsorships of different sizes → 13 USDC.
+    client.sponsor_event(&sponsor_a, &event_id, &100_000_000_i128);
+    client.sponsor_event(&sponsor_b, &event_id, &30_000_000_i128);
+    let expected_sponsorship = 130_000_000_i128;
+
+    // Everything collected is still held while the event is running.
+    let mid = client.get_event_summary(&event_id);
+    assert_eq!(mid.ticket_revenue, expected_ticket_revenue);
+    assert_eq!(mid.sponsorship_total, expected_sponsorship);
+    assert_eq!(mid.total_collected, 200_000_000_i128);
+    assert_eq!(mid.total_paid_out, 0);
+    assert_eq!(mid.balance, 200_000_000_i128);
+    assert_eq!(mid.total_collected, mid.total_paid_out + mid.balance);
+
+    // End the event so payouts are permitted.
+    env.as_contract(&client.address, || {
+        let mut event: Event = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Event(event_id))
+            .unwrap();
+        event.status = EventStatus::Ended;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Event(event_id), &event);
+    });
+
+    // Two disbursements to different recipients → 10 USDC out.
+    client.payout(&organizer, &event_id, &worker, &45_000_000_i128);
+    client.payout(&organizer, &event_id, &vendor, &55_000_000_i128);
+
+    let final_summary = client.get_event_summary(&event_id);
+    assert_eq!(final_summary.ticket_revenue, expected_ticket_revenue);
+    assert_eq!(final_summary.sponsorship_total, expected_sponsorship);
+    assert_eq!(final_summary.total_collected, 200_000_000_i128);
+    assert_eq!(final_summary.total_paid_out, 100_000_000_i128);
+    assert_eq!(final_summary.balance, 100_000_000_i128);
+
+    // The audit guarantee.
+    assert_eq!(
+        final_summary.total_collected,
+        final_summary.total_paid_out + final_summary.balance
+    );
+}
+
+/// The aggregate must never drift from the itemized records it summarizes.
+#[test]
+fn test_get_event_summary_agrees_with_itemized_queries() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, token_admin, _, client) = setup(&env);
+    let organizer = Address::generate(&env);
+    let attendee = Address::generate(&env);
+    let sponsor = Address::generate(&env);
+    let worker = Address::generate(&env);
+
+    token_admin.mint(&attendee, &100_000_000_i128);
+    token_admin.mint(&sponsor, &100_000_000_i128);
+
+    let event_id = create_test_event(&env, &client, &organizer);
+    client.buy_ticket(&attendee, &event_id, &1);
+    client.sponsor_event(&sponsor, &event_id, &20_000_000_i128);
+
+    env.as_contract(&client.address, || {
+        let mut event: Event = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Event(event_id))
+            .unwrap();
+        event.status = EventStatus::Ended;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Event(event_id), &event);
+    });
+    client.payout(&organizer, &event_id, &worker, &15_000_000_i128);
+
+    let summary = client.get_event_summary(&event_id);
+
+    let sponsorships = client.get_sponsorships(&event_id);
+    let mut sponsorship_sum = 0_i128;
+    for i in 0..sponsorships.len() {
+        sponsorship_sum += sponsorships.get(i).unwrap().amount;
+    }
+    assert_eq!(summary.sponsorship_total, sponsorship_sum);
+
+    let payouts = client.get_payouts(&event_id);
+    let mut payout_sum = 0_i128;
+    for i in 0..payouts.len() {
+        payout_sum += payouts.get(i).unwrap().amount;
+    }
+    assert_eq!(summary.total_paid_out, payout_sum);
+
+    let tiers = client.get_tiers(&event_id);
+    let mut tier_revenue = 0_i128;
+    for i in 0..tiers.len() {
+        let t = tiers.get(i).unwrap();
+        tier_revenue += t.price * i128::from(t.tickets_sold);
+    }
+    assert_eq!(summary.ticket_revenue, tier_revenue);
+
+    assert_eq!(summary.balance, client.get_balance(&event_id));
+}
+
+#[test]
+fn test_get_event_summary_nonexistent_event_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, _, _, client) = setup(&env);
+
+    let result = client.try_get_event_summary(&999);
+    assert_eq!(result, Err(Ok(Error::EventNotFound)));
+}

@@ -151,6 +151,25 @@ pub struct Payout {
     pub amount: i128,
 }
 
+/// Aggregated financial view of an event, so an auditor can confirm in one call
+/// that every unit collected is still held or accounted for as a disbursement.
+///
+/// The contract guarantees `total_collected == total_paid_out + balance`.
+#[contracttype]
+#[derive(Clone, PartialEq, Debug)]
+pub struct EventSummary {
+    /// Sum of every ticket sold, priced at its tier.
+    pub ticket_revenue: i128,
+    /// Sum of every sponsorship contribution.
+    pub sponsorship_total: i128,
+    /// `ticket_revenue + sponsorship_total` — everything the event ever took in.
+    pub total_collected: i128,
+    /// Sum of every payout disbursed from the event balance.
+    pub total_paid_out: i128,
+    /// Funds still held by the contract for this event.
+    pub balance: i128,
+}
+
 // ─── Storage keys ─────────────────────────────────────────────────────────────
 
 #[contracttype]
@@ -670,6 +689,62 @@ impl NovaEventsContract {
             .get(&DataKey::Event(event_id))
             .ok_or(Error::EventNotFound)?;
         Ok(event.balance)
+    }
+
+    /// Returns a single audit view of an event's money: what came in from
+    /// tickets, what came in from sponsors, what went out, and what is left.
+    ///
+    /// Every figure is derived from the same records the itemized queries read,
+    /// so the summary cannot drift from `get_sponsorships` / `get_payouts`.
+    /// The scans are bounded by MAX_TIERS, MAX_SPONSORSHIPS, and MAX_PAYOUTS.
+    pub fn get_event_summary(env: Env, event_id: u32) -> Result<EventSummary, Error> {
+        let event: Event = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Event(event_id))
+            .ok_or(Error::EventNotFound)?;
+
+        let tiers: Vec<TicketTier> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Tiers(event_id))
+            .ok_or(Error::TiersNotFound)?;
+
+        let mut ticket_revenue: i128 = 0;
+        for i in 0..tiers.len() {
+            let t: TicketTier = tiers.get(i).unwrap();
+            ticket_revenue += t.price * i128::from(t.tickets_sold);
+        }
+
+        let sponsorships: Vec<Sponsorship> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Sponsorships(event_id))
+            .unwrap_or_else(|| Vec::new(&env));
+
+        let mut sponsorship_total: i128 = 0;
+        for i in 0..sponsorships.len() {
+            sponsorship_total += sponsorships.get(i).unwrap().amount;
+        }
+
+        let payouts: Vec<Payout> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Payouts(event_id))
+            .unwrap_or_else(|| Vec::new(&env));
+
+        let mut total_paid_out: i128 = 0;
+        for i in 0..payouts.len() {
+            total_paid_out += payouts.get(i).unwrap().amount;
+        }
+
+        Ok(EventSummary {
+            ticket_revenue,
+            sponsorship_total,
+            total_collected: ticket_revenue + sponsorship_total,
+            total_paid_out,
+            balance: event.balance,
+        })
     }
 
     /// Returns the sponsor's share of total sponsorship for an event in basis points
