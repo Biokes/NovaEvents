@@ -1225,3 +1225,99 @@ fn test_get_event_summary_nonexistent_event_fails() {
     let result = client.try_get_event_summary(&999);
     assert_eq!(result, Err(Ok(Error::EventNotFound)));
 }
+
+// ─── Emergency Pause Tests ───────────────────────────────────────────────────
+
+#[test]
+fn test_pause_unpause_access_control() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, _, _, client) = setup(&env);
+    let admin = client.get_admin();
+    let impostor = Address::generate(&env);
+
+    assert!(!client.is_paused());
+
+    // Non-admin cannot pause
+    let res = client.try_pause(&impostor);
+    assert_eq!(res, Err(Ok(Error::Unauthorized)));
+    assert!(!client.is_paused());
+
+    // Admin can pause
+    client.pause(&admin);
+    assert!(client.is_paused());
+
+    // Non-admin cannot unpause
+    let res = client.try_unpause(&impostor);
+    assert_eq!(res, Err(Ok(Error::Unauthorized)));
+    assert!(client.is_paused());
+
+    // Admin can unpause
+    client.unpause(&admin);
+    assert!(!client.is_paused());
+}
+
+#[test]
+fn test_paused_contract_rejects_state_changing_calls_and_unpause_restores() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_token_addr, token_admin, _, client) = setup(&env);
+    let admin = client.get_admin();
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    token_admin.mint(&buyer, &100_000_000_i128);
+
+    // Create an event while active
+    let event_id = create_test_event(&env, &client, &organizer);
+    let ticket_id = client.buy_ticket(&buyer, &event_id, &0);
+
+    // Emergency pause the contract
+    client.pause(&admin);
+    assert!(client.is_paused());
+
+    // 1. Creating events is rejected when paused
+    let create_res = client.try_create_event(
+        &organizer,
+        &String::from_str(&env, "Paused Summit"),
+        &String::from_str(&env, "Desc"),
+        &String::from_str(&env, "Venue"),
+        &1_750_000_000_u64,
+        &500_000_000_i128,
+        &default_tiers(&env),
+    );
+    assert_eq!(create_res, Err(Ok(Error::ContractPaused)));
+
+    // 2. Buying tickets is rejected when paused
+    let buy_res = client.try_buy_ticket(&buyer, &event_id, &0);
+    assert_eq!(buy_res, Err(Ok(Error::ContractPaused)));
+
+    // 3. Sponsoring events is rejected when paused
+    let sponsor_res = client.try_sponsor_event(&buyer, &event_id, &10_000_000_i128);
+    assert_eq!(sponsor_res, Err(Ok(Error::ContractPaused)));
+
+    // 4. Redeeming tickets is rejected when paused
+    let redeem_res = client.try_redeem_ticket(&organizer, &event_id, &ticket_id);
+    assert_eq!(redeem_res, Err(Ok(Error::ContractPaused)));
+
+    // 5. Transferring tickets is rejected when paused
+    let transfer_res = client.try_transfer_ticket(&buyer, &event_id, &ticket_id, &recipient);
+    assert_eq!(transfer_res, Err(Ok(Error::ContractPaused)));
+
+    // 6. Read-only queries continue to work normally
+    assert_eq!(client.event_count(), 1);
+    let event = client.get_event(&event_id);
+    assert_eq!(event.organizer, organizer);
+    assert_eq!(client.get_ticket(&event_id, &ticket_id).owner, buyer);
+
+    // Unpause restores operations
+    client.unpause(&admin);
+    assert!(!client.is_paused());
+
+    // Normal ticket transfer succeeds after unpause
+    client.transfer_ticket(&buyer, &event_id, &ticket_id, &recipient);
+    assert_eq!(client.get_ticket(&event_id, &ticket_id).owner, recipient);
+}

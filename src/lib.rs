@@ -77,6 +77,8 @@ pub enum Error {
     TooManyPayouts = 25,
     /// Recipient must differ from the ticket's current owner.
     InvalidRecipient = 26,
+    /// Contract is currently paused by admin.
+    ContractPaused = 27,
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -183,6 +185,19 @@ pub enum DataKey {
     Ticket(u32, u32),
     Sponsorships(u32),
     Payouts(u32),
+    Paused,
+}
+
+fn require_not_paused(env: &Env) -> Result<(), Error> {
+    if env
+        .storage()
+        .instance()
+        .get(&DataKey::Paused)
+        .unwrap_or(false)
+    {
+        return Err(Error::ContractPaused);
+    }
+    Ok(())
 }
 
 // ─── Contract ─────────────────────────────────────────────────────────────────
@@ -205,6 +220,46 @@ impl NovaEventsContract {
         Ok(())
     }
 
+    /// Emergency halt for all state-changing contract functions.
+    /// Callable only by the registered admin.
+    pub fn pause(env: Env, admin: Address) -> Result<(), Error> {
+        admin.require_auth();
+        let current_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(Error::NotInitialized)?;
+        if admin != current_admin {
+            return Err(Error::Unauthorized);
+        }
+        env.storage().instance().set(&DataKey::Paused, &true);
+        Ok(())
+    }
+
+    /// Resumes normal contract operations after an emergency halt.
+    /// Callable only by the registered admin.
+    pub fn unpause(env: Env, admin: Address) -> Result<(), Error> {
+        admin.require_auth();
+        let current_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(Error::NotInitialized)?;
+        if admin != current_admin {
+            return Err(Error::Unauthorized);
+        }
+        env.storage().instance().set(&DataKey::Paused, &false);
+        Ok(())
+    }
+
+    /// Returns whether the contract is currently paused.
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
+    }
+
     /// Organizer creates a new event with one or more ticket tiers.
     /// Returns the new event ID.
     // Each parameter is an independent required field on a Soroban entrypoint;
@@ -220,6 +275,7 @@ impl NovaEventsContract {
         funding_goal: i128,
         tiers: Vec<TierInput>,
     ) -> Result<u32, Error> {
+        require_not_paused(&env)?;
         organizer.require_auth();
 
         if tiers.is_empty() {
@@ -310,6 +366,7 @@ impl NovaEventsContract {
         event_id: u32,
         tier_index: u32,
     ) -> Result<u32, Error> {
+        require_not_paused(&env)?;
         buyer.require_auth();
 
         let mut event: Event = env
@@ -401,6 +458,7 @@ impl NovaEventsContract {
         event_id: u32,
         ticket_id: u32,
     ) -> Result<(), Error> {
+        require_not_paused(&env)?;
         organizer.require_auth();
 
         let event: Event = env
@@ -466,6 +524,7 @@ impl NovaEventsContract {
         ticket_id: u32,
         to: Address,
     ) -> Result<(), Error> {
+        require_not_paused(&env)?;
         from.require_auth();
 
         let event: Event = env
@@ -516,6 +575,7 @@ impl NovaEventsContract {
         event_id: u32,
         amount: i128,
     ) -> Result<(), Error> {
+        require_not_paused(&env)?;
         sponsor.require_auth();
 
         if amount <= 0 {
@@ -577,6 +637,7 @@ impl NovaEventsContract {
         recipient: Address,
         amount: i128,
     ) -> Result<(), Error> {
+        require_not_paused(&env)?;
         organizer.require_auth();
 
         let mut event: Event = env
