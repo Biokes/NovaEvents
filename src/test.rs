@@ -1061,7 +1061,6 @@ fn test_multiple_payouts_accumulate_in_ledger() {
     assert_eq!(token.balance(&worker_b), 2_000_000_i128);
 }
 
-<<<<<<< HEAD
 // ─── Event summary tests ─────────────────────────────────────────────────────
 
 #[test]
@@ -1241,7 +1240,7 @@ fn test_buy_tickets_happy_path_and_supply_check() {
 
     let event_id = create_test_event(&env, &client, &organizer);
 
-    // Tier 0 has 100 supply at 50 USDC (50_000_000). Buy 3 tickets.
+    // Tier 0 has 100 supply at 1 USDC (10_000_000). Buy 3 tickets.
     let ticket_ids = client.buy_tickets(&buyer, &event_id, &0, &3);
     assert_eq!(ticket_ids.len(), 3);
     assert_eq!(ticket_ids.get(0).unwrap(), 0);
@@ -1253,10 +1252,10 @@ fn test_buy_tickets_happy_path_and_supply_check() {
     assert_eq!(client.get_ticket(&event_id, &1).owner, buyer);
     assert_eq!(client.get_ticket(&event_id, &2).owner, buyer);
 
-    // Single token transfer for 3 * 50 = 150 USDC
-    assert_eq!(client.get_balance(&event_id), 150_000_000_i128);
+    // Single token transfer for 3 * 10 = 30 USDC (30_000_000)
+    assert_eq!(client.get_balance(&event_id), 30_000_000_i128);
     let token = TokenClient::new(&env, &token_addr);
-    assert_eq!(token.balance(&buyer), 850_000_000_i128);
+    assert_eq!(token.balance(&buyer), 970_000_000_i128);
 
     // Tiers reflects 3 tickets sold
     let tiers = client.get_tiers(&event_id);
