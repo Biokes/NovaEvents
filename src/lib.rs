@@ -379,9 +379,10 @@ impl NovaEventsContract {
             .persistent()
             .get(&DataKey::TicketCounter(event_id))
             .unwrap_or(0);
-        env.storage()
-            .persistent()
-            .set(&DataKey::TicketCounter(event_id), &(starting_ticket_id + quantity));
+        env.storage().persistent().set(
+            &DataKey::TicketCounter(event_id),
+            &(starting_ticket_id + quantity),
+        );
 
         let mut ticket_ids: Vec<u32> = Vec::new(&env);
         for offset in 0..quantity {
