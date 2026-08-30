@@ -1263,7 +1263,7 @@ fn test_paused_contract_rejects_state_changing_calls_and_unpause_restores() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let (token_addr, token_admin, _, client) = setup(&env);
+    let (_token_addr, token_admin, _, client) = setup(&env);
     let admin = client.get_admin();
     let organizer = Address::generate(&env);
     let buyer = Address::generate(&env);

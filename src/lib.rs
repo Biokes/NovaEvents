@@ -189,7 +189,12 @@ pub enum DataKey {
 }
 
 fn require_not_paused(env: &Env) -> Result<(), Error> {
-    if env.storage().instance().get(&DataKey::Paused).unwrap_or(false) {
+    if env
+        .storage()
+        .instance()
+        .get(&DataKey::Paused)
+        .unwrap_or(false)
+    {
         return Err(Error::ContractPaused);
     }
     Ok(())
@@ -249,7 +254,10 @@ impl NovaEventsContract {
 
     /// Returns whether the contract is currently paused.
     pub fn is_paused(env: Env) -> bool {
-        env.storage().instance().get(&DataKey::Paused).unwrap_or(false)
+        env.storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
     }
 
     /// Organizer creates a new event with one or more ticket tiers.
