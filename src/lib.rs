@@ -357,17 +357,22 @@ impl NovaEventsContract {
         Ok(event_id)
     }
 
-    /// Buyer purchases a ticket in a given tier.
-    /// Transfers `tier.price` USDC from buyer to this contract.
-    /// Returns the new ticket ID.
-    pub fn buy_ticket(
+    /// Buyer purchases multiple tickets in a given tier in a single transaction.
+    /// Transfers `tier.price * quantity` USDC from buyer to this contract.
+    /// Returns the list of newly created ticket IDs.
+    pub fn buy_tickets(
         env: Env,
         buyer: Address,
         event_id: u32,
         tier_index: u32,
-    ) -> Result<u32, Error> {
+        quantity: u32,
+    ) -> Result<Vec<u32>, Error> {
         require_not_paused(&env)?;
         buyer.require_auth();
+
+        if quantity == 0 {
+            return Err(Error::InvalidAmount);
+        }
 
         let mut event: Event = env
             .storage()
@@ -388,11 +393,14 @@ impl NovaEventsContract {
         }
 
         let tier: TicketTier = tiers.get(tier_index).unwrap();
-        if tier.tickets_sold >= tier.supply_cap {
+        if tier.tickets_sold + quantity > tier.supply_cap {
             return Err(Error::TierSoldOut);
         }
 
-        let price = tier.price;
+        let total_price = tier
+            .price
+            .checked_mul(quantity as i128)
+            .ok_or(Error::InvalidAmount)?;
         let token_addr: Address = env
             .storage()
             .instance()
@@ -408,7 +416,7 @@ impl NovaEventsContract {
                     name: t.name,
                     price: t.price,
                     supply_cap: t.supply_cap,
-                    tickets_sold: t.tickets_sold + 1,
+                    tickets_sold: t.tickets_sold + quantity,
                 });
             } else {
                 updated.push_back(t);
@@ -418,37 +426,56 @@ impl NovaEventsContract {
             .persistent()
             .set(&DataKey::Tiers(event_id), &updated);
 
-        event.balance += price;
+        event.balance += total_price;
         env.storage()
             .persistent()
             .set(&DataKey::Event(event_id), &event);
 
-        let ticket_id: u32 = env
+        let starting_ticket_id: u32 = env
             .storage()
             .persistent()
             .get(&DataKey::TicketCounter(event_id))
             .unwrap_or(0);
-        env.storage()
-            .persistent()
-            .set(&DataKey::TicketCounter(event_id), &(ticket_id + 1));
-
         env.storage().persistent().set(
-            &DataKey::Ticket(event_id, ticket_id),
-            &Ticket {
-                event_id,
-                tier_index,
-                owner: buyer.clone(),
-                redeemed: false,
-            },
+            &DataKey::TicketCounter(event_id),
+            &(starting_ticket_id + quantity),
         );
+
+        let mut ticket_ids: Vec<u32> = Vec::new(&env);
+        for offset in 0..quantity {
+            let ticket_id = starting_ticket_id + offset;
+            env.storage().persistent().set(
+                &DataKey::Ticket(event_id, ticket_id),
+                &Ticket {
+                    event_id,
+                    tier_index,
+                    owner: buyer.clone(),
+                    redeemed: false,
+                },
+            );
+            ticket_ids.push_back(ticket_id);
+        }
 
         TokenClient::new(&env, &token_addr).transfer(
             &buyer,
             env.current_contract_address(),
-            &price,
+            &total_price,
         );
 
-        Ok(ticket_id)
+        Ok(ticket_ids)
+    }
+
+    /// Buyer purchases a ticket in a given tier.
+    /// Transfers `tier.price` USDC from buyer to this contract.
+    /// Returns the new ticket ID.
+    pub fn buy_ticket(
+        env: Env,
+        buyer: Address,
+        event_id: u32,
+        tier_index: u32,
+    ) -> Result<u32, Error> {
+        let ticket_ids = Self::buy_tickets(env, buyer, event_id, tier_index, 1)?;
+        Ok(ticket_ids.get(0).unwrap())
     }
 
     /// Organizer checks in (redeems) a ticket at the door.

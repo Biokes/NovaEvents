@@ -1226,6 +1226,55 @@ fn test_get_event_summary_nonexistent_event_fails() {
     assert_eq!(result, Err(Ok(Error::EventNotFound)));
 }
 
+// ─── buy_tickets tests ────────────────────────────────────────────────────────
+
+#[test]
+fn test_buy_tickets_happy_path_and_supply_check() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (token_addr, token_admin, _, client) = setup(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+    token_admin.mint(&buyer, &1_000_000_000_i128);
+
+    let event_id = create_test_event(&env, &client, &organizer);
+
+    // Tier 0 has 100 supply at 1 USDC (10_000_000). Buy 3 tickets.
+    let ticket_ids = client.buy_tickets(&buyer, &event_id, &0, &3);
+    assert_eq!(ticket_ids.len(), 3);
+    assert_eq!(ticket_ids.get(0).unwrap(), 0);
+    assert_eq!(ticket_ids.get(1).unwrap(), 1);
+    assert_eq!(ticket_ids.get(2).unwrap(), 2);
+
+    // All tickets owned by buyer
+    assert_eq!(client.get_ticket(&event_id, &0).owner, buyer);
+    assert_eq!(client.get_ticket(&event_id, &1).owner, buyer);
+    assert_eq!(client.get_ticket(&event_id, &2).owner, buyer);
+
+    // Single token transfer for 3 * 10 = 30 USDC (30_000_000)
+    assert_eq!(client.get_balance(&event_id), 30_000_000_i128);
+    let token = TokenClient::new(&env, &token_addr);
+    assert_eq!(token.balance(&buyer), 970_000_000_i128);
+
+    // Tiers reflects 3 tickets sold
+    let tiers = client.get_tiers(&event_id);
+    assert_eq!(tiers.get(0).unwrap().tickets_sold, 3);
+
+    // Buying 0 tickets fails
+    let zero_res = client.try_buy_tickets(&buyer, &event_id, &0, &0);
+    assert_eq!(zero_res, Err(Ok(Error::InvalidAmount)));
+
+    // Exceeding supply (97 remaining, asking 98) fails atomically
+    let overflow_res = client.try_buy_tickets(&buyer, &event_id, &0, &98);
+    assert_eq!(overflow_res, Err(Ok(Error::TierSoldOut)));
+
+    // Single buy_ticket still works seamlessly
+    let single_id = client.buy_ticket(&buyer, &event_id, &0);
+    assert_eq!(single_id, 3);
+    assert_eq!(client.get_tiers(&event_id).get(0).unwrap().tickets_sold, 4);
+}
+
 // ─── Emergency Pause Tests ───────────────────────────────────────────────────
 
 #[test]
