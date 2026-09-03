@@ -220,7 +220,6 @@ impl NovaEventsContract {
    ///
    /// Errors:
    /// - `AlreadyInitialized` if the contract has already been initialised.
-pub fn initialize(env: Env, admin: Address, token: Address) -> Result<(), Error> { ... }
     pub fn initialize(env: Env, admin: Address, token: Address) -> Result<(), Error> {
         admin.require_auth();
 
@@ -296,7 +295,6 @@ pub fn initialize(env: Env, admin: Address, token: Address) -> Result<(), Error>
 /// - `NoTiers`, `TooManyTiers`, `InvalidFundingGoal`, `EmptyName`, `EmptyDescription`,
 ///   `EmptyVenue`, `DateInPast`, `InvalidTierPrice`, `InvalidTierSupply`,
 ///   and `ContractPaused` (via require_not_paused).
-pub fn create_event(...) -> Result<u32, Error> { ... }
     #[allow(clippy::too_many_arguments)]
     pub fn create_event(
         env: Env,
