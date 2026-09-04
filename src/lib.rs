@@ -539,6 +539,73 @@ impl NovaEventsContract {
         Ok(())
     }
 
+    /// Organizer cancels an active event, refunding every ticket buyer the
+    /// price they paid, then transitions status to `Cancelled`.
+    ///
+    /// Sponsor refunds are a separate, tracked feature — sponsorship funds
+    /// stay in the event balance untouched by this call.
+    pub fn cancel_event(env: Env, organizer: Address, event_id: u32) -> Result<(), Error> {
+        require_not_paused(&env)?;
+        organizer.require_auth();
+
+        let mut event: Event = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Event(event_id))
+            .ok_or(Error::EventNotFound)?;
+        if event.organizer != organizer {
+            return Err(Error::Unauthorized);
+        }
+        if event.status != EventStatus::Active {
+            return Err(Error::EventNotActive);
+        }
+
+        let tiers: Vec<TicketTier> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Tiers(event_id))
+            .ok_or(Error::TiersNotFound)?;
+        let ticket_count: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::TicketCounter(event_id))
+            .unwrap_or(0);
+
+        let mut total_refunded: i128 = 0;
+        for ticket_id in 0..ticket_count {
+            let ticket: Ticket = env
+                .storage()
+                .persistent()
+                .get(&DataKey::Ticket(event_id, ticket_id))
+                .unwrap();
+            total_refunded += tiers.get(ticket.tier_index).unwrap().price;
+        }
+
+        event.balance -= total_refunded;
+        event.status = EventStatus::Cancelled;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Event(event_id), &event);
+
+        let token_addr: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Token)
+            .ok_or(Error::NotInitialized)?;
+        let token_client = TokenClient::new(&env, &token_addr);
+        for ticket_id in 0..ticket_count {
+            let ticket: Ticket = env
+                .storage()
+                .persistent()
+                .get(&DataKey::Ticket(event_id, ticket_id))
+                .unwrap();
+            let price = tiers.get(ticket.tier_index).unwrap().price;
+            token_client.transfer(&env.current_contract_address(), &ticket.owner, &price);
+        }
+
+        Ok(())
+    }
+
     /// Transfer ticket ownership from the current owner to a new address.
     ///
     /// Rules enforced:
