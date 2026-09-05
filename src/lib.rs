@@ -185,6 +185,7 @@ pub enum DataKey {
     Ticket(u32, u32),
     Sponsorships(u32),
     Payouts(u32),
+    OrganizerEvents(Address),
     Paused,
 }
 
@@ -318,6 +319,7 @@ impl NovaEventsContract {
             .instance()
             .set(&DataKey::EventCounter, &(event_id + 1));
 
+        let organizer_clone = organizer.clone();
         env.storage().persistent().set(
             &DataKey::Event(event_id),
             &Event {
@@ -330,6 +332,19 @@ impl NovaEventsContract {
                 balance: 0,
                 status: EventStatus::Active,
             },
+        );
+
+        // Maintain a reverse index from organizer to their event IDs so
+        // get_events_by_organizer doesn't have to scan every event.
+        let mut organizer_events: Vec<u32> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::OrganizerEvents(organizer_clone.clone()))
+            .unwrap_or_else(|| Vec::new(&env));
+        organizer_events.push_back(event_id);
+        env.storage().persistent().set(
+            &DataKey::OrganizerEvents(organizer_clone),
+            &organizer_events,
         );
 
         let mut tier_list: Vec<TicketTier> = Vec::new(&env);
@@ -539,11 +554,10 @@ impl NovaEventsContract {
         Ok(())
     }
 
-    /// Organizer cancels an active event, refunding every ticket buyer the
-    /// price they paid, then transitions status to `Cancelled`.
-    ///
-    /// Sponsor refunds are a separate, tracked feature — sponsorship funds
-    /// stay in the event balance untouched by this call.
+    /// Organizer cancels an `Active` event.
+    /// Refunds every unredeemed ticket buyer their tier price and refunds every
+    /// sponsor their contributed amount, then marks the event `Cancelled`.
+    /// Cancelling with no buyers/sponsors still succeeds (the refund loops no-op).
     pub fn cancel_event(env: Env, organizer: Address, event_id: u32) -> Result<(), Error> {
         require_not_paused(&env)?;
         organizer.require_auth();
@@ -560,6 +574,14 @@ impl NovaEventsContract {
             return Err(Error::EventNotActive);
         }
 
+        let token_addr: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Token)
+            .ok_or(Error::NotInitialized)?;
+        let token_client = TokenClient::new(&env, &token_addr);
+
+        // Refund each unredeemed ticket owner their tier price.
         let tiers: Vec<TicketTier> = env
             .storage()
             .persistent()
@@ -570,39 +592,38 @@ impl NovaEventsContract {
             .persistent()
             .get(&DataKey::TicketCounter(event_id))
             .unwrap_or(0);
-
-        let mut total_refunded: i128 = 0;
         for ticket_id in 0..ticket_count {
             let ticket: Ticket = env
                 .storage()
                 .persistent()
                 .get(&DataKey::Ticket(event_id, ticket_id))
-                .unwrap();
-            total_refunded += tiers.get(ticket.tier_index).unwrap().price;
+                .expect("recorded ticket index must exist");
+            if ticket.redeemed {
+                continue;
+            }
+            let tier: TicketTier = tiers
+                .get(ticket.tier_index)
+                .expect("ticket tier index must exist");
+            token_client.transfer(&env.current_contract_address(), &ticket.owner, &tier.price);
         }
 
-        event.balance -= total_refunded;
+        // Refund each sponsor their contributed amount.
+        let sponsorships: Vec<Sponsorship> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Sponsorships(event_id))
+            .unwrap_or_else(|| Vec::new(&env));
+        for i in 0..sponsorships.len() {
+            let s: Sponsorship = sponsorships.get(i).unwrap();
+            token_client.transfer(&env.current_contract_address(), &s.sponsor, &s.amount);
+        }
+
+        // Any unredeemed tickets/sponsorship balances are returned, so zero out balance.
+        event.balance = 0;
         event.status = EventStatus::Cancelled;
         env.storage()
             .persistent()
             .set(&DataKey::Event(event_id), &event);
-
-        let token_addr: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Token)
-            .ok_or(Error::NotInitialized)?;
-        let token_client = TokenClient::new(&env, &token_addr);
-        for ticket_id in 0..ticket_count {
-            let ticket: Ticket = env
-                .storage()
-                .persistent()
-                .get(&DataKey::Ticket(event_id, ticket_id))
-                .unwrap();
-            let price = tiers.get(ticket.tier_index).unwrap().price;
-            token_client.transfer(&env.current_contract_address(), &ticket.owner, &price);
-        }
-
         Ok(())
     }
 
@@ -836,6 +857,15 @@ impl NovaEventsContract {
             .instance()
             .get(&DataKey::EventCounter)
             .unwrap_or(0)
+    }
+
+    /// Returns the list of event IDs ever created by `organizer`.
+    /// Returns an empty `Vec` for an address that has not organized anything.
+    pub fn get_events_by_organizer(env: Env, organizer: Address) -> Vec<u32> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::OrganizerEvents(organizer))
+            .unwrap_or_else(|| Vec::new(&env))
     }
 
     pub fn ticket_count(env: Env, event_id: u32) -> u32 {
