@@ -1428,7 +1428,7 @@ fn test_get_events_by_organizer_isolation_between_organizers() {
     assert_eq!(b_events.get(1).unwrap(), b_second);
 
     // Neither list contains the other's event IDs.
-    assert!(!a_events.contains(&b_second));
+    assert!(!a_events.contains(b_second));
 }
 
 // ─── cancel_event tests (issue #24) ──────────────────────────────────────────
@@ -1570,4 +1570,45 @@ fn test_cancel_event_blocks_buying_and_sponsoring() {
         client.try_sponsor_event(&sponsor, &event_id, &10_000_000_i128),
         Err(Ok(Error::EventNotActive))
     );
+}
+
+#[test]
+fn test_cancel_event_blocked_while_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, _, _, client) = setup(&env);
+    let admin = client.get_admin();
+    let organizer = Address::generate(&env);
+    let event_id = create_test_event(&env, &client, &organizer);
+
+    client.pause(&admin);
+
+    let result = client.try_cancel_event(&organizer, &event_id);
+    assert_eq!(result, Err(Ok(Error::ContractPaused)));
+    assert_eq!(client.get_event(&event_id).status, EventStatus::Active);
+}
+
+#[test]
+fn test_end_event_blocked_while_paused() {
+    // end_event predates the pause feature and was never wired to check it —
+    // confirm it now respects the same emergency halt as every other
+    // state-changing function.
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, _, _, client) = setup(&env);
+    let admin = client.get_admin();
+    let organizer = Address::generate(&env);
+    let event_id = create_test_event(&env, &client, &organizer);
+
+    client.pause(&admin);
+
+    let result = client.try_end_event(&organizer, &event_id);
+    assert_eq!(result, Err(Ok(Error::ContractPaused)));
+    assert_eq!(client.get_event(&event_id).status, EventStatus::Active);
+
+    client.unpause(&admin);
+    client.end_event(&organizer, &event_id);
+    assert_eq!(client.get_event(&event_id).status, EventStatus::Ended);
 }

@@ -532,6 +532,7 @@ impl NovaEventsContract {
     /// Blocks further ticket purchases and sponsorships, and is the
     /// prerequisite for `payout`.
     pub fn end_event(env: Env, organizer: Address, event_id: u32) -> Result<(), Error> {
+        require_not_paused(&env)?;
         organizer.require_auth();
 
         let mut event: Event = env
