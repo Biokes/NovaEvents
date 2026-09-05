@@ -1,5 +1,4 @@
 #![no_std]
-#![warn(missing_docs)]
 
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, token::Client as TokenClient, Address,
@@ -208,18 +207,17 @@ pub struct NovaEventsContract;
 
 #[contractimpl]
 impl NovaEventsContract {
-    
-   /// One-time setup: authorize an admin and record the USDC token contract address.
-   ///
-   /// What it does:
-   /// - Stores the admin address and USDC token contract address in instance storage.
-   /// - Initializes the event counter to 0.
-   ///
-   /// Who may call:
-   /// - Any caller, but the `admin` address passed must authorize the call (via `require_auth`).
-   ///
-   /// Errors:
-   /// - `AlreadyInitialized` if the contract has already been initialised.
+    /// One-time setup: authorize an admin and record the USDC token contract address.
+    ///
+    /// What it does:
+    /// - Stores the admin address and USDC token contract address in instance storage.
+    /// - Initializes the event counter to 0.
+    ///
+    /// Who may call:
+    /// - Any caller, but the `admin` address passed must authorize the call (via `require_auth`).
+    ///
+    /// Errors:
+    /// - `AlreadyInitialized` if the contract has already been initialised.
     pub fn initialize(env: Env, admin: Address, token: Address) -> Result<(), Error> {
         admin.require_auth();
 
@@ -232,17 +230,17 @@ impl NovaEventsContract {
         Ok(())
     }
 
-/// Emergency halt for all state-changing contract functions.
-///
-/// What it does:
-/// - Sets the global paused flag to true. Used to prevent state-changing calls while paused.
-///
-/// Who may call:
-/// - Only the configured admin (the `admin` parameter must authorize the call and match stored admin).
-///
-/// Errors:
-/// - `NotInitialized` if the contract hasn't been initialized.
-/// - `Unauthorized` if the provided `admin` doesn't match the recorded admin.
+    /// Emergency halt for all state-changing contract functions.
+    ///
+    /// What it does:
+    /// - Sets the global paused flag to true. Used to prevent state-changing calls while paused.
+    ///
+    /// Who may call:
+    /// - Only the configured admin (the `admin` parameter must authorize the call and match stored admin).
+    ///
+    /// Errors:
+    /// - `NotInitialized` if the contract hasn't been initialized.
+    /// - `Unauthorized` if the provided `admin` doesn't match the recorded admin.
     pub fn pause(env: Env, admin: Address) -> Result<(), Error> {
         admin.require_auth();
         let current_admin: Address = env
@@ -281,20 +279,20 @@ impl NovaEventsContract {
             .unwrap_or(false)
     }
 
-/// Organizer creates a new event with one or more ticket tiers and returns the new event ID.
-///
-/// What it does:
-/// - Validates input (non-empty name/description/venue, positive funding goal, tiers present and valid).
-/// - Persists the Event, Tiers, TicketCounter and Sponsorships storage entries.
-/// - Increments the event counter and returns the created event ID.
-///
-/// Who may call:
-/// - The organizer address passed must authorize the call (`organizer.require_auth()`).
-///
-/// Errors:
-/// - `NoTiers`, `TooManyTiers`, `InvalidFundingGoal`, `EmptyName`, `EmptyDescription`,
-///   `EmptyVenue`, `DateInPast`, `InvalidTierPrice`, `InvalidTierSupply`,
-///   and `ContractPaused` (via require_not_paused).
+    /// Organizer creates a new event with one or more ticket tiers and returns the new event ID.
+    ///
+    /// What it does:
+    /// - Validates input (non-empty name/description/venue, positive funding goal, tiers present and valid).
+    /// - Persists the Event, Tiers, TicketCounter and Sponsorships storage entries.
+    /// - Increments the event counter and returns the created event ID.
+    ///
+    /// Who may call:
+    /// - The organizer address passed must authorize the call (`organizer.require_auth()`).
+    ///
+    /// Errors:
+    /// - `NoTiers`, `TooManyTiers`, `InvalidFundingGoal`, `EmptyName`, `EmptyDescription`,
+    ///   `EmptyVenue`, `DateInPast`, `InvalidTierPrice`, `InvalidTierSupply`,
+    ///   and `ContractPaused` (via require_not_paused).
     #[allow(clippy::too_many_arguments)]
     pub fn create_event(
         env: Env,
@@ -388,19 +386,19 @@ impl NovaEventsContract {
         Ok(event_id)
     }
 
-/// Buyer purchases multiple tickets in a given tier, transferring USDC to the contract.
-///
-/// What it does:
-/// - Validates event/tier/quantity and updates tier sold counts, ticket records, and event balance.
-/// - Transfers USDC from buyer to the contract.
-///
-/// Who may call:
-/// - The buyer address passed must authorize the call (`buyer.require_auth()`).
-///
-/// Errors:
-/// - `ContractPaused`, `InvalidAmount`, `EventNotFound`, `EventNotActive`, `TiersNotFound`,
-///   `InvalidTier`, `TierSoldOut`, `InvalidAmount` (on arithmetic overflow), `NotInitialized`
-///   (if token address missing).
+    /// Buyer purchases multiple tickets in a given tier, transferring USDC to the contract.
+    ///
+    /// What it does:
+    /// - Validates event/tier/quantity and updates tier sold counts, ticket records, and event balance.
+    /// - Transfers USDC from buyer to the contract.
+    ///
+    /// Who may call:
+    /// - The buyer address passed must authorize the call (`buyer.require_auth()`).
+    ///
+    /// Errors:
+    /// - `ContractPaused`, `InvalidAmount`, `EventNotFound`, `EventNotActive`, `TiersNotFound`,
+    ///   `InvalidTier`, `TierSoldOut`, `InvalidAmount` (on arithmetic overflow), `NotInitialized`
+    ///   (if token address missing).
     pub fn buy_tickets(
         env: Env,
         buyer: Address,
@@ -519,18 +517,17 @@ impl NovaEventsContract {
         Ok(ticket_ids.get(0).unwrap())
     }
 
-/// Organizer checks in (redeems) a ticket at the door.
-///
-/// What it does:
-/// - Marks a ticket as redeemed on-chain.
-///
-/// Who may call:
-/// - Only the event's organizer (the `organizer` parameter must authorize the call).
-///
-/// Errors:
-/// - `ContractPaused`, `NotInitialized` (if event missing/other storage issues),
-/// - `EventNotFound`, `Unauthorized`, `TicketNotFound`, `AlreadyRedeemed`.
-
+    /// Organizer checks in (redeems) a ticket at the door.
+    ///
+    /// What it does:
+    /// - Marks a ticket as redeemed on-chain.
+    ///
+    /// Who may call:
+    /// - Only the event's organizer (the `organizer` parameter must authorize the call).
+    ///
+    /// Errors:
+    /// - `ContractPaused`, `NotInitialized` (if event missing/other storage issues),
+    /// - `EventNotFound`, `Unauthorized`, `TicketNotFound`, `AlreadyRedeemed`.
     pub fn redeem_ticket(
         env: Env,
         organizer: Address,
@@ -778,28 +775,27 @@ impl NovaEventsContract {
         Ok(())
     }
 
-/// Returns the Event record for `event_id`.
-///
-/// Who may call:
-/// - Publicly readable by any caller (no authorization required).
-///
-/// Errors:
-/// - `EventNotFound` if no event exists with the supplied id.
-
+    /// Returns the Event record for `event_id`.
+    ///
+    /// Who may call:
+    /// - Publicly readable by any caller (no authorization required).
+    ///
+    /// Errors:
+    /// - `EventNotFound` if no event exists with the supplied id.
     pub fn get_event(env: Env, event_id: u32) -> Result<Event, Error> {
         env.storage()
             .persistent()
             .get(&DataKey::Event(event_id))
             .ok_or(Error::EventNotFound)
     }
-    
-/// Returns the stored ticket tiers for `event_id`.
-///
-/// Who may call:
-/// - Publicly readable by any caller.
-///
-/// Errors:
-/// - `TiersNotFound` if the event has no tiers stored.
+
+    /// Returns the stored ticket tiers for `event_id`.
+    ///
+    /// Who may call:
+    /// - Publicly readable by any caller.
+    ///
+    /// Errors:
+    /// - `TiersNotFound` if the event has no tiers stored.
     pub fn get_tiers(env: Env, event_id: u32) -> Result<Vec<TicketTier>, Error> {
         env.storage()
             .persistent()
@@ -807,6 +803,13 @@ impl NovaEventsContract {
             .ok_or(Error::TiersNotFound)
     }
 
+    /// Returns a single ticket's ownership record.
+    ///
+    /// Who may call:
+    /// - Publicly readable by any caller.
+    ///
+    /// Errors:
+    /// - `TicketNotFound` if no ticket exists with the supplied id.
     pub fn get_ticket(env: Env, event_id: u32, ticket_id: u32) -> Result<Ticket, Error> {
         env.storage()
             .persistent()
@@ -814,6 +817,13 @@ impl NovaEventsContract {
             .ok_or(Error::TicketNotFound)
     }
 
+    /// Returns every sponsorship contribution recorded for `event_id`.
+    ///
+    /// Who may call:
+    /// - Publicly readable by any caller.
+    ///
+    /// Errors:
+    /// - Never errors; returns an empty `Vec` if the event has no sponsorships.
     pub fn get_sponsorships(env: Env, event_id: u32) -> Vec<Sponsorship> {
         env.storage()
             .persistent()
@@ -821,6 +831,13 @@ impl NovaEventsContract {
             .unwrap_or_else(|| Vec::new(&env))
     }
 
+    /// Returns every payout disbursed for `event_id`.
+    ///
+    /// Who may call:
+    /// - Publicly readable by any caller.
+    ///
+    /// Errors:
+    /// - Never errors; returns an empty `Vec` if the event has no payouts.
     pub fn get_payouts(env: Env, event_id: u32) -> Vec<Payout> {
         env.storage()
             .persistent()
@@ -828,6 +845,13 @@ impl NovaEventsContract {
             .unwrap_or_else(|| Vec::new(&env))
     }
 
+    /// Returns the total number of events ever created.
+    ///
+    /// Who may call:
+    /// - Publicly readable by any caller.
+    ///
+    /// Errors:
+    /// - Never errors; returns 0 before the first event is created.
     pub fn event_count(env: Env) -> u32 {
         env.storage()
             .instance()
@@ -835,6 +859,13 @@ impl NovaEventsContract {
             .unwrap_or(0)
     }
 
+    /// Returns the number of tickets sold for `event_id`.
+    ///
+    /// Who may call:
+    /// - Publicly readable by any caller.
+    ///
+    /// Errors:
+    /// - Never errors; returns 0 if no tickets have been sold.
     pub fn ticket_count(env: Env, event_id: u32) -> u32 {
         env.storage()
             .persistent()
